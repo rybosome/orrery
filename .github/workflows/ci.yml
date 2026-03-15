@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint-typecheck-vitest:
+    name: Lint + typecheck + vitest (ubuntu + node 22)
+    uses: ./.github/workflows/reusable-node-pnpm.yml
+    with:
+      runs_on: ubuntu-latest
+      node_version: '22'
+      command: |
+        set -euo pipefail
+
+        pnpm run lint
+        pnpm run typecheck
+        pnpm run test
+
+  orrery-e2e:
+    name: Orrery Playwright e2e (ubuntu + node 22)
+    uses: ./.github/workflows/reusable-node-pnpm.yml
+    with:
+      runs_on: ubuntu-latest
+      node_version: '22'
+      command: |
+        set -euo pipefail
+
+        pnpm exec playwright install --with-deps chromium
+        pnpm run e2e
