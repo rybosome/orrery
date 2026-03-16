@@ -457,11 +457,11 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
   const detailNoiseStrength = THREE.MathUtils.clamp(detailNoise?.strength ?? 0.0, 0.0, 0.15)
   const detailNoiseScale = THREE.MathUtils.clamp(detailNoise?.scale ?? 0.0, 0.0, 128.0)
 
-  // If the caller omits `bodyId`, avoid hashing the empty string (which would make
-  // many bodies share the same noise seed). For truly stable per-body results,
-  // pass `bodyId` or explicitly set `detailNoise.seed`.
-  const detailNoiseSeedInput = options.bodyId ?? JSON.stringify(options.appearance)
-  const detailNoiseSeed = detailNoise?.seed ?? stableHash01(detailNoiseSeedInput)
+  // Default detail-noise seed should be stable but compact:
+  // - prefer explicit `detailNoise.seed` when provided,
+  // - otherwise hash `bodyId` when available,
+  // - otherwise fall back to 0.
+  const detailNoiseSeed = detailNoise?.seed ?? (options.bodyId ? stableHash01(options.bodyId) : 0)
 
   let map: THREE.Texture | undefined = textureKind ? makeProceduralBodyTexture(textureKind) : undefined
   let mapRelease: (() => void) | undefined

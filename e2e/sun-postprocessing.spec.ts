@@ -25,13 +25,31 @@ const setupDeterminismAndNetworkBlock = async (page: any, baseURL?: string) => {
   })
 }
 
-const waitForViewerReadyForScreenshot = async (page: any, opts?: { renders?: number }) => {
-  await page.waitForFunction(() => (window as any).__tspice_viewer__rendered_scene === true)
+const waitForViewerReadyForScreenshot = async (
+  page: any,
+  opts?: { renders?: number; timeoutMs?: number },
+) => {
+  const timeoutMs = opts?.timeoutMs ?? 30_000
+
+  await page.waitForFunction(
+    () => {
+      const viewer = window as any
+      const pendingTextureLoads = viewer.__tspice_viewer__pending_texture_loads
+      return (
+        viewer.__tspice_viewer__rendered_scene === true &&
+        (pendingTextureLoads == null || pendingTextureLoads === 0)
+      )
+    },
+    undefined,
+    { timeout: timeoutMs },
+  )
 
   // In CI we occasionally observed screenshots taken before async textures were
   // fully uploaded/visible. Force a few synchronous renders via the e2e API to
   // ensure the current frame reflects final assets.
-  await page.waitForFunction(() => (window as any).__tspice_viewer__e2e?.renderNTimes != null)
+  await page.waitForFunction(() => (window as any).__tspice_viewer__e2e?.renderNTimes != null, undefined, {
+    timeout: timeoutMs,
+  })
 
   const renders = opts?.renders ?? 2
 

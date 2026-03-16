@@ -4,8 +4,8 @@
  * (PDS dataset: MGS-M-MOLA-5-MEGDR-L3-V1.0).
  *
  * Outputs:
- * - apps/orrery/public/textures/planets/mars-mola-normal-2k.png
- * - apps/orrery/public/textures/planets/mars-roughness-proxy-2k.png
+ * - public/textures/planets/mars-mola-normal-2k.png
+ * - public/textures/planets/mars-roughness-proxy-2k.png
  *
  * Roughness is a proxy intended to be "mostly matte" (values near 1.0) with subtle
  * large-scale variation from:
@@ -287,6 +287,13 @@ async function main() {
   const imgBuf = await fsp.readFile(molaImgPath)
   if (imgBuf.length !== expectedBytes) {
     throw new Error(`Unexpected IMG size: got ${imgBuf.length} bytes, expected ${expectedBytes}`)
+  }
+
+  const albedoRepoPath = path.relative(orreryDir, albedoPath)
+  if (!(await pathExists(albedoPath))) {
+    throw new Error(
+      `Missing required albedo input file: ${albedoRepoPath}. In this standalone repo it should be at public/textures/planets/mars-viking-colorized-4k.jpg`,
+    )
   }
 
   const readDemInt16 = (x, y) => {
