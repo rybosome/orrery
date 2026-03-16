@@ -1,7 +1,8 @@
-import type { BodyRef, FrameId } from '../spice/SpiceClient.js'
+import type { BodyRef, FrameId } from '../spice/types.js'
 
 export type BodyTextureKind = 'earth' | 'moon' | 'sun'
 
+/** Surface texture styling (either an asset URL or a lightweight procedural texture). */
 export interface BodySurfaceTextureStyle {
   /**
    * Optional texture URL/path.
@@ -22,6 +23,7 @@ export interface BodySurfaceTextureStyle {
   color?: string
 }
 
+/** Surface material styling for a renderable body (color + optional texture/tuning). */
 export interface BodySurfaceStyle {
   /** Renderer color hint (e.g. `"#ffffff"`, `"skyblue"`). */
   color: string
@@ -94,11 +96,13 @@ export interface BodySurfaceStyle {
   }
 }
 
+/** Layer style wrapper for the built-in Earth appearance model. */
 export interface EarthAppearanceLayerStyle {
   kind: 'earth'
   earth: EarthAppearanceStyle
 }
 
+/** Layer style for a generic atmosphere shell. */
 export interface AtmosphereAppearanceLayerStyle {
   kind: 'atmosphere'
   atmosphere: {
@@ -115,6 +119,7 @@ export interface AtmosphereAppearanceLayerStyle {
   }
 }
 
+/** Layer style for a thin aerosol haze shell (for example Mars dust). */
 export interface AerosolAppearanceLayerStyle {
   kind: 'aerosol'
   aerosol: {
@@ -131,6 +136,7 @@ export interface AerosolAppearanceLayerStyle {
   }
 }
 
+/** Fallback layer style for unrecognized kinds (keeps layer schemas explicit). */
 export interface UnknownBodyLayerStyle {
   kind: string
   /**
@@ -150,6 +156,7 @@ export type BodyLayerStyle =
   | AerosolAppearanceLayerStyle
   | UnknownBodyLayerStyle
 
+/** Type guard for Earth appearance layers. */
 export function isEarthAppearanceLayer(layer: BodyLayerStyle): layer is EarthAppearanceLayerStyle {
   if (typeof layer !== 'object' || layer === null) return false
 
@@ -161,6 +168,7 @@ export function isEarthAppearanceLayer(layer: BodyLayerStyle): layer is EarthApp
   return typeof earth === 'object' && earth !== null
 }
 
+/** Type guard for atmosphere appearance layers. */
 export function isAtmosphereAppearanceLayer(layer: BodyLayerStyle): layer is AtmosphereAppearanceLayerStyle {
   if (typeof layer !== 'object' || layer === null) return false
 
@@ -171,6 +179,7 @@ export function isAtmosphereAppearanceLayer(layer: BodyLayerStyle): layer is Atm
   return typeof atmosphere === 'object' && atmosphere !== null
 }
 
+/** Type guard for aerosol appearance layers. */
 export function isAerosolAppearanceLayer(layer: BodyLayerStyle): layer is AerosolAppearanceLayerStyle {
   if (typeof layer !== 'object' || layer === null) return false
 
@@ -181,6 +190,7 @@ export function isAerosolAppearanceLayer(layer: BodyLayerStyle): layer is Aeroso
   return typeof aerosol === 'object' && aerosol !== null
 }
 
+/** Composite appearance style (surface + optional rings + optional layers). */
 export interface BodyAppearanceStyle {
   surface: BodySurfaceStyle
 
@@ -191,6 +201,7 @@ export interface BodyAppearanceStyle {
   layers?: BodyLayerStyle[]
 }
 
+/** Extra Earth-specific appearance tunables (night lights, clouds, atmosphere, oceans). */
 export interface EarthAppearanceStyle {
   /** Optional night lights (emissive) texture; should be equirectangular 2:1. */
   nightLightsTextureUrl?: string
@@ -220,6 +231,7 @@ export interface EarthAppearanceStyle {
   oceanSpecularIntensity?: number
 }
 
+/** Ring rendering style (sizes relative to body radius + texture). */
 export interface SceneRingsStyle {
   /** Inner radius relative to the parent body's radius. */
   innerRadiusRatio: number
@@ -241,6 +253,7 @@ export interface SceneRingsStyle {
  * SPICE state*.
  */
 
+/** Renderer-facing style for a body (size + appearance + optional UI label). */
 export interface SceneBodyStyle {
   /** Body radius in km. */
   radiusKm: number
@@ -255,6 +268,7 @@ export interface SceneBodyStyle {
   // `appearance.layers` (see `EarthAppearanceLayerStyle`).
 }
 
+/** Scene body entry linking a SPICE body ref to a renderer style. */
 export interface SceneBody {
   /** NAIF ID or body name; fed into `SpiceClient.getBodyState`. */
   body: BodyRef
@@ -265,6 +279,7 @@ export interface SceneBody {
   style: SceneBodyStyle
 }
 
+/** Top-level scene description: coordinate frame + observer + bodies. */
 export interface SceneModel {
   /** Frame the scene is rendered in (default should be `"J2000"`). */
   frame: FrameId
