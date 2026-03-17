@@ -133,9 +133,9 @@ export const BODY_REGISTRY: readonly BodyRegistryEntry[] = [
       appearance: {
         surface: {
           color: '#e9c46a',
-          texture: {
-            url: 'textures/planets/venus.png',
-          },
+          // Keep the base shell flat so the moving cloud layer remains readable.
+          // Reusing the same texture for both layers makes cloud motion collapse
+          // into subtle brightness flicker.
         },
         layers: [
           {
