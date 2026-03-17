@@ -137,6 +137,43 @@ export const BODY_REGISTRY: readonly BodyRegistryEntry[] = [
             url: 'textures/planets/venus.png',
           },
         },
+        layers: [
+          {
+            kind: 'atmosphere',
+            atmosphere: {
+              // Denser and broader visible glow than Earth.
+              radiusRatio: 1.026,
+              color: '#f4d7a8',
+              intensity: 0.9,
+              rimPower: 1.5,
+              sunBias: 0.62,
+            },
+          },
+          {
+            kind: 'aerosol',
+            aerosol: {
+              // Thick high-altitude haze contribution.
+              radiusRatio: 1.042,
+              color: '#edbf82',
+              intensity: 0.38,
+              rimPower: 2.2,
+              sunBias: 0.72,
+            },
+          },
+          {
+            kind: 'clouds',
+            clouds: {
+              radiusRatio: 1.014,
+              textureUrl: 'textures/planets/venus.png',
+              opacity: 0.9,
+              driftDegPerSec: 0.08,
+              swirlAmount: 0.035,
+              swirlScale: 2.6,
+              swirlSpeed: 0.14,
+              nightSideFloor: 0.12,
+            },
+          },
+        ],
       },
       label: 'Venus',
     },

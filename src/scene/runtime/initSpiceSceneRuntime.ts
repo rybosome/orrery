@@ -57,6 +57,20 @@ export type SceneUiState = {
   earthNightLightsIntensity: number
   earthAtmosphereIntensity: number
   earthCloudsNightMultiplier: number
+
+  venusCloudOpacity: number
+  venusCloudDriftDegPerSec: number
+  venusHazeIntensity: number
+  venusAtmosphereRimPower: number
+  venusAtmosphereSunBias: number
+  venusAtmosphereRadiusRatio: number
+  venusAerosolRimPower: number
+  venusAerosolSunBias: number
+  venusAerosolRadiusRatio: number
+  venusCloudSwirlAmount: number
+  venusCloudSwirlScale: number
+  venusCloudSwirlSpeed: number
+  venusCloudNightSideFloor: number
 }
 
 export type SpiceSceneRuntime = {
@@ -419,6 +433,22 @@ export async function initSpiceSceneRuntime(args: {
         cloudsNightMultiplier: next.earthCloudsNightMultiplier,
       }
 
+      const venusTuning = {
+        cloudOpacity: next.venusCloudOpacity,
+        cloudDriftDegPerSec: next.venusCloudDriftDegPerSec,
+        hazeIntensity: next.venusHazeIntensity,
+        atmosphereRimPower: next.venusAtmosphereRimPower,
+        atmosphereSunBias: next.venusAtmosphereSunBias,
+        atmosphereRadiusRatio: next.venusAtmosphereRadiusRatio,
+        aerosolRimPower: next.venusAerosolRimPower,
+        aerosolSunBias: next.venusAerosolSunBias,
+        aerosolRadiusRatio: next.venusAerosolRadiusRatio,
+        cloudSwirlAmount: next.venusCloudSwirlAmount,
+        cloudSwirlScale: next.venusCloudSwirlScale,
+        cloudSwirlSpeed: next.venusCloudSwirlSpeed,
+        cloudNightSideFloor: next.venusCloudNightSideFloor,
+      }
+
       // Only refetch SPICE if ET changes.
       if (cachedEtSec !== next.etSec || bodies.some((b) => !b.lastState)) {
         await ensureSpiceSample(next.etSec)
@@ -698,7 +728,7 @@ export async function initSpiceSceneRuntime(args: {
       // Update any body-specific shader uniforms using the same sun direction.
       const sunDirWorld = dir.position.clone().normalize()
       for (const b of bodies) {
-        b.update?.({ sunDirWorld, etSec: next.etSec, earthTuning })
+        b.update?.({ sunDirWorld, etSec: next.etSec, earthTuning, venusTuning })
       }
 
       // Record label overlay inputs so we can update it on camera movement.
