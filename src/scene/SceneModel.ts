@@ -136,6 +136,29 @@ export interface AerosolAppearanceLayerStyle {
   }
 }
 
+/** Layer style for a cloud-shell appearance layer. */
+export interface CloudsAppearanceLayerStyle {
+  kind: 'clouds'
+  clouds: {
+    /** Shell radius relative to the body radius. */
+    radiusRatio?: number
+    /** Clouds texture URL/path (equirectangular 2:1 recommended). */
+    textureUrl?: string
+    /** Shell opacity scalar (0..1). */
+    opacity?: number
+    /** Additional cloud drift around +Z in deg/sec of ET. */
+    driftDegPerSec?: number
+    /** Procedural swirl distortion amount. */
+    swirlAmount?: number
+    /** Procedural swirl noise scale. */
+    swirlScale?: number
+    /** Procedural swirl animation speed. */
+    swirlSpeed?: number
+    /** Night-side intensity floor for cloud shading. */
+    nightSideFloor?: number
+  }
+}
+
 /** Fallback layer style for unrecognized kinds (keeps layer schemas explicit). */
 export interface UnknownBodyLayerStyle {
   kind: string
@@ -154,6 +177,7 @@ export type BodyLayerStyle =
   | EarthAppearanceLayerStyle
   | AtmosphereAppearanceLayerStyle
   | AerosolAppearanceLayerStyle
+  | CloudsAppearanceLayerStyle
   | UnknownBodyLayerStyle
 
 /** Type guard for Earth appearance layers. */
@@ -188,6 +212,17 @@ export function isAerosolAppearanceLayer(layer: BodyLayerStyle): layer is Aeroso
 
   const aerosol = (layer as { aerosol?: unknown }).aerosol
   return typeof aerosol === 'object' && aerosol !== null
+}
+
+/** Type guard for clouds appearance layers. */
+export function isCloudsAppearanceLayer(layer: BodyLayerStyle): layer is CloudsAppearanceLayerStyle {
+  if (typeof layer !== 'object' || layer === null) return false
+
+  const maybeKind = (layer as { kind?: unknown }).kind
+  if (maybeKind !== 'clouds') return false
+
+  const clouds = (layer as { clouds?: unknown }).clouds
+  return typeof clouds === 'object' && clouds !== null
 }
 
 /** Composite appearance style (surface + optional rings + optional layers). */

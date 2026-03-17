@@ -5,6 +5,7 @@ import { createRingMesh } from './RingMesh.js'
 import {
   isAtmosphereAppearanceLayer,
   isAerosolAppearanceLayer,
+  isCloudsAppearanceLayer,
   isEarthAppearanceLayer,
   type BodyAppearanceStyle,
   type BodyTextureKind,
@@ -26,10 +27,27 @@ export type EarthAppearanceTuning = {
   cloudsNightMultiplier: number
 }
 
+export type VenusAppearanceTuning = {
+  cloudOpacity: number
+  cloudDriftDegPerSec: number
+  hazeIntensity: number
+  atmosphereRimPower: number
+  atmosphereSunBias: number
+  atmosphereRadiusRatio: number
+  aerosolRimPower: number
+  aerosolSunBias: number
+  aerosolRadiusRatio: number
+  cloudSwirlAmount: number
+  cloudSwirlScale: number
+  cloudSwirlSpeed: number
+  cloudNightSideFloor: number
+}
+
 export type BodyMeshUpdate = (args: {
   sunDirWorld: THREE.Vector3
   etSec: number
   earthTuning?: EarthAppearanceTuning
+  venusTuning?: VenusAppearanceTuning
 }) => void
 
 function stableHash01(input: string): number {
@@ -428,6 +446,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
   const warnOnce = createWarnOnce()
 
   const isEarth = options.bodyId === 'EARTH'
+  const isVenus = options.bodyId === 'VENUS'
 
   // Collect async assets so `ready` consistently represents "all appearance assets are ready".
   const readyExtras: Promise<void>[] = []
@@ -681,6 +700,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
   const earth = options.appearance.layers?.find(isEarthAppearanceLayer)?.earth
   const atmosphere = options.appearance.layers?.find(isAtmosphereAppearanceLayer)?.atmosphere
   const aerosol = options.appearance.layers?.find(isAerosolAppearanceLayer)?.aerosol
+  const clouds = options.appearance.layers?.find(isCloudsAppearanceLayer)?.clouds
 
   const extraTexturesToDispose: THREE.Texture[] = []
   const extraTextureReleases: Array<() => void> = []
@@ -787,6 +807,86 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     mesh.add(shellMesh)
 
     ensureSunDirWorldUpdate()
+
+    return {
+      mesh: shellMesh,
+      intensity: args.intensity,
+      rimPower: args.rimPower,
+      sunBias: args.sunBias,
+    }
+  }
+
+  const createCloudShell = (args: {
+    radiusRatio: number
+    opacity: number
+    alphaTest: number
+    textureUrl?: string
+    driftRadPerSec: number
+    renderOrder: number
+    useTextureAsColorMap?: boolean
+  }) => {
+    const geo = new THREE.SphereGeometry(1, 48, 24)
+    geo.rotateX(Math.PI / 2)
+    extraGeometriesToDispose.push(geo)
+
+    const cloudMaterial = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      transparent: true,
+      opacity: clampFinite(args.opacity, 0.0, 1.0, 0.85),
+      alphaTest: clampFinite(args.alphaTest, 0.0, 0.25, 0.02),
+      depthWrite: false,
+      depthTest: true,
+      roughness: 1.0,
+      metalness: 0.0,
+      alphaMap: black1x1,
+      blending: THREE.NormalBlending,
+    })
+    extraMaterialsToDispose.push(cloudMaterial)
+
+    const cloudMesh = new THREE.Mesh(geo, cloudMaterial)
+    cloudMesh.scale.setScalar(clampFinite(args.radiusRatio, 1.001, 1.25, 1.01))
+    cloudMesh.renderOrder = args.renderOrder
+    cloudMesh.raycast = () => {}
+    mesh.add(cloudMesh)
+
+    const cloudState = { driftRadPerSec: args.driftRadPerSec }
+
+    if (args.textureUrl) {
+      readyExtras.push(
+        loadTextureCached(args.textureUrl, { colorSpace: THREE.SRGBColorSpace })
+          .then(({ texture: tex, release }) => {
+            let installed = false
+            try {
+              if (disposed) return
+
+              tex.wrapS = THREE.RepeatWrapping
+              tex.wrapT = THREE.RepeatWrapping
+              tex.needsUpdate = true
+
+              cloudMaterial.alphaMap = tex
+              if (args.useTextureAsColorMap) {
+                cloudMaterial.map = tex
+              }
+              cloudMaterial.needsUpdate = true
+
+              extraTextureReleases.push(release)
+              installed = true
+            } finally {
+              if (!installed) release()
+            }
+          })
+          .catch((err) => {
+            if (isTextureCacheClearedError(err)) return
+            console.warn('Failed to load clouds texture', args.textureUrl, err)
+          }),
+      )
+    }
+
+    return {
+      mesh: cloudMesh,
+      material: cloudMaterial,
+      state: cloudState,
+    }
   }
 
   // Optional terminator/night-side albedo suppression.
@@ -967,6 +1067,14 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
   // Generic atmosphere shell layer (used for thin/low-intensity atmospheres like Mars).
   // Note: Earth uses its dedicated `earth` layer for atmosphere, clouds, etc.
+  let venusAtmosphereShell:
+    | {
+        mesh: THREE.Mesh
+        intensity: { value: number }
+        rimPower: { value: number }
+        sunBias: { value: number }
+      }
+    | undefined
   if (!isEarth && atmosphere) {
     // Clamp to keep configs safe and prevent inverted shells / huge overdraw.
     const atmosphereRadiusRatio = clampFinite(atmosphere.radiusRatio, 1.001, 1.25, 1.01)
@@ -974,7 +1082,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     const atmosphereRimPower = clampFinite(atmosphere.rimPower, 0.1, 10.0, 2.4)
     const atmosphereSunBias = clampFinite(atmosphere.sunBias, 0.0, 1.0, 0.75)
 
-    createRimGlowShell({
+    const shell = createRimGlowShell({
       radiusRatio: atmosphereRadiusRatio,
       renderOrder: 1,
       color: atmosphere.color ?? '#ffffff',
@@ -982,9 +1090,21 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
       rimPower: { value: atmosphereRimPower },
       sunBias: { value: atmosphereSunBias },
     })
+
+    if (isVenus) {
+      venusAtmosphereShell = shell
+    }
   }
 
   // Generic aerosol/dust shell layer (stylized rim glow; e.g. Mars dust haze).
+  let venusAerosolShell:
+    | {
+        mesh: THREE.Mesh
+        intensity: { value: number }
+        rimPower: { value: number }
+        sunBias: { value: number }
+      }
+    | undefined
   if (aerosol) {
     // Clamp to keep configs safe and prevent inverted shells / huge overdraw.
     const aerosolRadiusRatio = clampFinite(aerosol.radiusRatio, 1.001, 1.25, 1.01)
@@ -992,7 +1112,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     const aerosolRimPower = clampFinite(aerosol.rimPower, 0.1, 10.0, 3.0)
     const aerosolSunBias = clampFinite(aerosol.sunBias, 0.0, 1.0, 0.8)
 
-    createRimGlowShell({
+    const shell = createRimGlowShell({
       radiusRatio: aerosolRadiusRatio,
       renderOrder: 2,
       color: aerosol.color ?? '#ffffff',
@@ -1000,11 +1120,15 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
       rimPower: { value: aerosolRimPower },
       sunBias: { value: aerosolSunBias },
     })
+
+    if (isVenus) {
+      venusAerosolShell = shell
+    }
   }
 
   let cloudsMesh: THREE.Mesh | undefined
   let cloudsMaterial: THREE.MeshStandardMaterial | undefined
-  let cloudsDriftRadPerSec = 0
+  const cloudsDrift = { radPerSec: 0 }
 
   const waterMaskUniform = { value: black1x1 as THREE.Texture }
   const useWaterMaskUniform = { value: 0.0 }
@@ -1210,26 +1334,22 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
       sunBias: { value: earth.atmosphereSunBias ?? 0.65 },
     })
 
-    // Clouds shell
-    const cloudsGeo = new THREE.SphereGeometry(1, 48, 24)
-    cloudsGeo.rotateX(Math.PI / 2)
-    extraGeometriesToDispose.push(cloudsGeo)
-    const newCloudsMaterial = new THREE.MeshStandardMaterial({
-      color: '#ffffff',
-      transparent: true,
+    const earthClouds = createCloudShell({
+      radiusRatio: earth.cloudsRadiusRatio ?? 1.01,
       opacity: earth.cloudsOpacity ?? 0.85,
       alphaTest: earth.cloudsAlphaTest ?? 0.02,
-      depthWrite: false,
-      roughness: 1.0,
-      metalness: 0.0,
-      alphaMap: black1x1,
+      textureUrl: earth.cloudsTextureUrl,
+      driftRadPerSec: earth.cloudsDriftRadPerSec ?? 0.0,
+      renderOrder: 1,
     })
-    cloudsMaterial = newCloudsMaterial
-    extraMaterialsToDispose.push(newCloudsMaterial)
+
+    cloudsMesh = earthClouds.mesh
+    cloudsMaterial = earthClouds.material
+    cloudsDrift.radPerSec = earthClouds.state.driftRadPerSec
 
     // Darken clouds on the night side as well (otherwise the global ambient light
     // makes clouds show up nearly as brightly at night as during day).
-    const restoreEarthClouds = composeOnBeforeCompile(newCloudsMaterial, (shader) => {
+    const restoreEarthClouds = composeOnBeforeCompile(earthClouds.material, (shader) => {
       shader.uniforms.uSunDirWorld = { value: uSunDirWorld }
       shader.uniforms.uTwilight = uTwilight
       shader.uniforms.uCloudsNightMultiplier = uCloudsNightMultiplier
@@ -1294,13 +1414,6 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     })
     onBeforeCompileRestores.push(restoreEarthClouds)
 
-    cloudsMesh = new THREE.Mesh(cloudsGeo, newCloudsMaterial)
-    cloudsMesh.scale.setScalar(earth.cloudsRadiusRatio ?? 1.01)
-    cloudsMesh.renderOrder = 1
-    mesh.add(cloudsMesh)
-
-    cloudsDriftRadPerSec = earth.cloudsDriftRadPerSec ?? 0.0
-
     // Load optional textures.
     const extras: Promise<void>[] = []
 
@@ -1329,34 +1442,6 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
           .catch((err) => {
             if (isTextureCacheClearedError(err)) return
             console.warn('Failed to load Earth night lights texture', earth.nightLightsTextureUrl, err)
-          }),
-      )
-    }
-
-    if (earth.cloudsTextureUrl) {
-      extras.push(
-        loadTextureCached(earth.cloudsTextureUrl, { colorSpace: THREE.SRGBColorSpace })
-          .then(({ texture: tex, release }) => {
-            let installed = false
-            try {
-              if (disposed) return
-
-              tex.wrapS = THREE.RepeatWrapping
-              tex.wrapT = THREE.RepeatWrapping
-              tex.needsUpdate = true
-
-              newCloudsMaterial.alphaMap = tex
-              newCloudsMaterial.needsUpdate = true
-
-              extraTextureReleases.push(release)
-              installed = true
-            } finally {
-              if (!installed) release()
-            }
-          })
-          .catch((err) => {
-            if (isTextureCacheClearedError(err)) return
-            console.warn('Failed to load Earth clouds texture', earth.cloudsTextureUrl, err)
           }),
       )
     }
@@ -1400,8 +1485,241 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
         uCloudsNightMultiplier.value = earthTuning.cloudsNightMultiplier
       }
 
-      if (cloudsMesh && cloudsDriftRadPerSec !== 0) {
-        const phase = (etSec * cloudsDriftRadPerSec) % (Math.PI * 2)
+      if (cloudsMesh && cloudsDrift.radPerSec !== 0) {
+        const phase = (etSec * cloudsDrift.radPerSec) % (Math.PI * 2)
+        cloudsMesh.rotation.z = phase
+      }
+    })
+  }
+
+  if (!isEarth && clouds) {
+    const genericClouds = createCloudShell({
+      radiusRatio: clouds.radiusRatio ?? 1.01,
+      opacity: clouds.opacity ?? 0.85,
+      alphaTest: 0.02,
+      textureUrl: clouds.textureUrl,
+      driftRadPerSec: THREE.MathUtils.degToRad(clampFinite(clouds.driftDegPerSec, 0.0, 2.0, 0.0)),
+      renderOrder: 1,
+      useTextureAsColorMap: isVenus,
+    })
+
+    cloudsMesh = genericClouds.mesh
+    cloudsMaterial = genericClouds.material
+    cloudsDrift.radPerSec = genericClouds.state.driftRadPerSec
+  }
+
+  if (isVenus && clouds && cloudsMaterial) {
+    ensureSunDirWorldUpdate()
+
+    const uCloudSwirlAmount = { value: clampFinite(clouds.swirlAmount, 0.0, 0.3, 0.03) }
+    const uCloudSwirlScale = { value: clampFinite(clouds.swirlScale, 0.5, 8.0, 2.0) }
+    const uCloudSwirlSpeed = { value: clampFinite(clouds.swirlSpeed, 0.0, 1.0, 0.1) }
+    const uCloudSwirlPhase = { value: 0.0 }
+    const uCloudNightSideFloor = { value: clampFinite(clouds.nightSideFloor, 0.0, 0.4, 0.1) }
+
+    const restoreVenusClouds = composeOnBeforeCompile(cloudsMaterial, (shader) => {
+      shader.uniforms.uSunDirWorld = { value: uSunDirWorld }
+      shader.uniforms.uCloudSwirlAmount = uCloudSwirlAmount
+      shader.uniforms.uCloudSwirlScale = uCloudSwirlScale
+      shader.uniforms.uCloudSwirlSpeed = uCloudSwirlSpeed
+      shader.uniforms.uCloudSwirlPhase = uCloudSwirlPhase
+      shader.uniforms.uCloudNightSideFloor = uCloudNightSideFloor
+
+      const markerCommon = '// tspice:venus-clouds:uniforms'
+      const markerNormal = '// tspice:venus-clouds:geometry-normal'
+      const markerMap = '// tspice:venus-clouds:map-noise'
+      const markerAlpha = '// tspice:venus-clouds:alpha-warp'
+      const markerLights = '// tspice:venus-clouds:night-side'
+
+      const res = safeShaderReplaceAll({
+        shader,
+        source: 'fragmentShader',
+        warnOnce,
+        warnKey: 'venus-clouds:patch',
+        replacements: [
+          {
+            needle: '#include <common>',
+            marker: markerCommon,
+            replacement: [
+              '#include <common>',
+              markerCommon,
+              'uniform vec3 uSunDirWorld;',
+              'uniform float uCloudSwirlAmount;',
+              'uniform float uCloudSwirlScale;',
+              'uniform float uCloudSwirlSpeed;',
+              'uniform float uCloudSwirlPhase;',
+              'uniform float uCloudNightSideFloor;',
+              '',
+              'float tspice_hash21( vec2 p ) {',
+              '  p = fract( p * vec2( 123.34, 345.45 ) );',
+              '  p += dot( p, p + 34.345 );',
+              '  return fract( p.x * p.y );',
+              '}',
+              '',
+              'vec2 tspice_cloudWarpUv( vec2 uv ) {',
+              '  float t = uCloudSwirlPhase * max( uCloudSwirlSpeed, 0.0 );',
+              '  float scale = max( uCloudSwirlScale, 0.001 );',
+              '  float waveA = sin( ( uv.y * scale + t * 0.22 ) * 6.28318530718 );',
+              '  float waveB = cos( ( uv.x * ( scale * 0.75 ) - t * 0.17 ) * 6.28318530718 );',
+              '  float noise = tspice_hash21( uv * ( scale * 1.37 ) + vec2( t * 0.03, -t * 0.05 ) );',
+              '  float swirl = ( waveA + waveB ) * 0.5 + ( noise - 0.5 );',
+              '  vec2 dir = normalize( vec2( -waveA, waveB ) + vec2( 1e-5 ) );',
+              '  return fract( uv + dir * ( uCloudSwirlAmount * 0.08 * swirl ) );',
+              '}',
+            ].join('\n'),
+            warnKey: 'venus-clouds:uniforms',
+          },
+          {
+            needle: '#include <normal_fragment_begin>',
+            marker: markerNormal,
+            replacement: [
+              '#include <normal_fragment_begin>',
+              markerNormal,
+              '\t// Stable geometric normal (view space) before any normal map perturbations.',
+              '\tvec3 tspiceGeometryNormal = nonPerturbedNormal;',
+            ].join('\n'),
+            warnKey: 'venus-clouds:geometry-normal',
+          },
+          {
+            needle: '#include <map_fragment>',
+            marker: markerMap,
+            replacement: [
+              '#include <map_fragment>',
+              markerMap,
+              '#ifdef USE_UV',
+              '  float cloudLuma = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );',
+              '  float centered = cloudLuma - 0.5;',
+              '  float contrastStrength = 0.18 + uCloudSwirlAmount * 1.6;',
+              '  float latBand = sin( vUv.y * ( uCloudSwirlScale * 0.85 ) * 6.28318530718 );',
+              '  float tone = 1.0 + centered * contrastStrength + latBand * 0.025;',
+              '  diffuseColor.rgb *= clamp( tone, 0.84, 1.18 );',
+              '#endif',
+            ].join('\n'),
+            warnKey: 'venus-clouds:map-noise',
+          },
+          {
+            needle: '#include <alphamap_fragment>',
+            marker: markerAlpha,
+            replacement: [
+              markerAlpha,
+              '#ifdef USE_ALPHAMAP',
+              '\tvec2 warpedUv = tspice_cloudWarpUv( vAlphaMapUv );',
+              '\tdiffuseColor.a *= texture2D( alphaMap, warpedUv ).g;',
+              '#endif',
+            ].join('\n'),
+            warnKey: 'venus-clouds:alpha-warp',
+          },
+          {
+            needle: '#include <lights_fragment_begin>',
+            marker: markerLights,
+            replacement: [
+              markerLights,
+              '\t// Venus clouds: keep the night side dim but never fully black.',
+              '\t{',
+              '\t\tvec3 sunDirView = normalize( ( viewMatrix * vec4( uSunDirWorld, 0.0 ) ).xyz );',
+              '\t\tfloat ndotl = dot( tspiceGeometryNormal, sunDirView );',
+              '\t\tfloat dayFactor = smoothstep( -0.08, 0.2, ndotl );',
+              '\t\tdiffuseColor.rgb *= mix( uCloudNightSideFloor, 1.0, dayFactor );',
+              '\t}',
+              '',
+              '#include <lights_fragment_begin>',
+            ].join('\n'),
+            warnKey: 'venus-clouds:night-side',
+          },
+        ],
+      })
+
+      if (!res.ok) return
+
+      const shaderSources: ShaderSource = shader
+      shaderSources.fragmentShader = res.next
+    })
+    onBeforeCompileRestores.push(restoreVenusClouds)
+
+    update = composeUpdate(update, ({ etSec, venusTuning }) => {
+      if (venusTuning) {
+        if (cloudsMaterial) {
+          cloudsMaterial.opacity = clampFinite(venusTuning.cloudOpacity, 0.0, 1.0, cloudsMaterial.opacity)
+        }
+
+        cloudsDrift.radPerSec = THREE.MathUtils.degToRad(
+          clampFinite(venusTuning.cloudDriftDegPerSec, 0.0, 2.0, THREE.MathUtils.radToDeg(cloudsDrift.radPerSec)),
+        )
+
+        uCloudSwirlAmount.value = clampFinite(venusTuning.cloudSwirlAmount, 0.0, 0.3, uCloudSwirlAmount.value)
+        uCloudSwirlScale.value = clampFinite(venusTuning.cloudSwirlScale, 0.5, 8.0, uCloudSwirlScale.value)
+        uCloudSwirlSpeed.value = clampFinite(venusTuning.cloudSwirlSpeed, 0.0, 1.0, uCloudSwirlSpeed.value)
+        uCloudNightSideFloor.value = clampFinite(
+          venusTuning.cloudNightSideFloor,
+          0.0,
+          0.4,
+          uCloudNightSideFloor.value,
+        )
+
+        if (venusAtmosphereShell) {
+          venusAtmosphereShell.mesh.scale.setScalar(
+            clampFinite(
+              venusTuning.atmosphereRadiusRatio,
+              1.001,
+              1.25,
+              atmosphere?.radiusRatio ?? venusAtmosphereShell.mesh.scale.x,
+            ),
+          )
+          venusAtmosphereShell.rimPower.value = clampFinite(
+            venusTuning.atmosphereRimPower,
+            0.1,
+            10.0,
+            venusAtmosphereShell.rimPower.value,
+          )
+          venusAtmosphereShell.sunBias.value = clampFinite(
+            venusTuning.atmosphereSunBias,
+            0.0,
+            1.0,
+            venusAtmosphereShell.sunBias.value,
+          )
+        }
+
+        if (venusAerosolShell) {
+          venusAerosolShell.mesh.scale.setScalar(
+            clampFinite(
+              venusTuning.aerosolRadiusRatio,
+              1.001,
+              1.25,
+              aerosol?.radiusRatio ?? venusAerosolShell.mesh.scale.x,
+            ),
+          )
+          venusAerosolShell.intensity.value = clampFinite(
+            venusTuning.hazeIntensity,
+            0.0,
+            2.0,
+            venusAerosolShell.intensity.value,
+          )
+          venusAerosolShell.rimPower.value = clampFinite(
+            venusTuning.aerosolRimPower,
+            0.1,
+            10.0,
+            venusAerosolShell.rimPower.value,
+          )
+          venusAerosolShell.sunBias.value = clampFinite(
+            venusTuning.aerosolSunBias,
+            0.0,
+            1.0,
+            venusAerosolShell.sunBias.value,
+          )
+        }
+      }
+
+      uCloudSwirlPhase.value = etSec
+
+      if (cloudsMesh && cloudsDrift.radPerSec !== 0) {
+        const phase = (etSec * cloudsDrift.radPerSec) % (Math.PI * 2)
+        cloudsMesh.rotation.z = phase
+      }
+    })
+  } else if (!isEarth && clouds) {
+    update = composeUpdate(update, ({ etSec }) => {
+      if (cloudsMesh && cloudsDrift.radPerSec !== 0) {
+        const phase = (etSec * cloudsDrift.radPerSec) % (Math.PI * 2)
         cloudsMesh.rotation.z = phase
       }
     })
@@ -1426,6 +1744,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
       material.needsUpdate = true
 
       if (cloudsMaterial) {
+        cloudsMaterial.map = null
         cloudsMaterial.alphaMap = null
         cloudsMaterial.needsUpdate = true
       }

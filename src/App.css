@@ -1408,6 +1408,30 @@
   gap: 8px;
 }
 
+.advancedCollapsibleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--phosphor-border);
+}
+
+.advancedCollapsibleGroup:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.advancedCollapsibleToggle {
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.02em;
+}
+
+.advancedCollapsibleBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .advancedFieldset {
   border: none;
   padding: 0;

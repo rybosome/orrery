@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react'
 import * as THREE from 'three'
 import type { SpiceAsync } from '@rybosome/tspice'
 import type { CameraController, CameraControllerState } from './controls/CameraController.js'
@@ -28,7 +28,12 @@ import { RenderHud, type RenderHudStats } from './renderer/RenderHud.js'
 import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRuntime.js'
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
 import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/initSpiceSceneRuntime.js'
-import { isEarthAppearanceLayer } from './scene/SceneModel.js'
+import {
+  isAerosolAppearanceLayer,
+  isAtmosphereAppearanceLayer,
+  isCloudsAppearanceLayer,
+  isEarthAppearanceLayer,
+} from './scene/SceneModel.js'
 
 type AdvancedPaneId = 'time' | 'scale' | 'guides' | 'orbits' | 'performance' | 'rendering'
 
@@ -48,6 +53,8 @@ type AdvancedHelpTopicId =
   | 'bodyFixedAxes'
   | 'renderHud'
   | 'j2000Axes'
+
+type RenderingGroupId = 'postprocess' | 'lighting' | 'venus'
 
 const ADVANCED_PANES: Array<{ id: AdvancedPaneId; tabLabel: string; title: string; summary: string }> = [
   {
@@ -84,7 +91,7 @@ const ADVANCED_PANES: Array<{ id: AdvancedPaneId; tabLabel: string; title: strin
     id: 'rendering',
     tabLabel: 'RENDERING',
     title: 'RENDERING',
-    summary: 'Sun postprocessing and lighting/emissive tuning.',
+    summary: 'Sun postprocessing, lighting/emissive tuning, and Venus appearance controls.',
   },
 ]
 
@@ -236,6 +243,42 @@ function AdvancedHelpButton({
   )
 }
 
+function RenderingCollapsibleGroup({
+  id,
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  id: string
+  title: string
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  const bodyId = `${id}-body`
+
+  return (
+    <section className="advancedCollapsibleGroup" id={id}>
+      <button
+        className="advancedToggle advancedCollapsibleToggle"
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
+      >
+        {open ? '[-]' : '[+]'} {title}
+      </button>
+
+      {open ? (
+        <div className="advancedCollapsibleBody" id={bodyId}>
+          {children}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 const HOME_PRESET_RADII = HOME_PRESET_KEYS.map((k) => getHomePresetStateForKey(k).radius)
 const HOME_PRESET_RADIUS_MIN = Math.min(...HOME_PRESET_RADII)
 const HOME_PRESET_RADIUS_MAX = Math.max(...HOME_PRESET_RADII)
@@ -307,6 +350,15 @@ export function SceneCanvas() {
   const [advancedPane, setAdvancedPane] = useState<AdvancedPaneId>('time')
   const [advancedHelpTopic, setAdvancedHelpTopic] = useState<AdvancedHelpTopicId | null>(null)
 
+  const [renderingGroupOpen, setRenderingGroupOpen] = useState<Record<RenderingGroupId, boolean>>({
+    postprocess: false,
+    lighting: false,
+    venus: false,
+  })
+  const toggleRenderingGroup = useCallback((group: RenderingGroupId) => {
+    setRenderingGroupOpen((prev) => ({ ...prev, [group]: !prev[group] }))
+  }, [])
+
   const controlsTabsId = useId()
 
   const activeAdvancedPane = useMemo(() => {
@@ -329,6 +381,16 @@ export function SceneCanvas() {
     return layers?.find(isEarthAppearanceLayer)?.earth
   }, [])
 
+  const venusAppearanceDefaults = useMemo(() => {
+    const layers = getBodyRegistryEntry('VENUS').style.appearance?.layers
+
+    return {
+      atmosphere: layers?.find(isAtmosphereAppearanceLayer)?.atmosphere,
+      aerosol: layers?.find(isAerosolAppearanceLayer)?.aerosol,
+      clouds: layers?.find(isCloudsAppearanceLayer)?.clouds,
+    }
+  }, [])
+
   // Lighting + Sun appearance defaults.
   const AMBIENT_LIGHT_INTENSITY_DEFAULT = 0.45
   const SUN_LIGHT_INTENSITY_DEFAULT = 2.1
@@ -345,6 +407,34 @@ export function SceneCanvas() {
   const earthNightLightsIntensity = earthAppearanceDefaults?.nightLightsIntensity ?? 1.25
   const earthAtmosphereIntensity = earthAppearanceDefaults?.atmosphereIntensity ?? 0.55
   const earthCloudsNightMultiplier = 0.0
+
+  const VENUS_CLOUD_OPACITY_DEFAULT = venusAppearanceDefaults.clouds?.opacity ?? 0.9
+  const VENUS_CLOUD_DRIFT_DEG_PER_SEC_DEFAULT = venusAppearanceDefaults.clouds?.driftDegPerSec ?? 0.08
+  const VENUS_HAZE_INTENSITY_DEFAULT = venusAppearanceDefaults.aerosol?.intensity ?? 0.38
+  const VENUS_ATMOSPHERE_RIM_POWER_DEFAULT = venusAppearanceDefaults.atmosphere?.rimPower ?? 1.5
+  const VENUS_ATMOSPHERE_SUN_BIAS_DEFAULT = venusAppearanceDefaults.atmosphere?.sunBias ?? 0.62
+  const VENUS_ATMOSPHERE_RADIUS_RATIO_DEFAULT = venusAppearanceDefaults.atmosphere?.radiusRatio ?? 1.026
+  const VENUS_AEROSOL_RIM_POWER_DEFAULT = venusAppearanceDefaults.aerosol?.rimPower ?? 2.2
+  const VENUS_AEROSOL_SUN_BIAS_DEFAULT = venusAppearanceDefaults.aerosol?.sunBias ?? 0.72
+  const VENUS_AEROSOL_RADIUS_RATIO_DEFAULT = venusAppearanceDefaults.aerosol?.radiusRatio ?? 1.042
+  const VENUS_CLOUD_SWIRL_AMOUNT_DEFAULT = venusAppearanceDefaults.clouds?.swirlAmount ?? 0.035
+  const VENUS_CLOUD_SWIRL_SCALE_DEFAULT = venusAppearanceDefaults.clouds?.swirlScale ?? 2.6
+  const VENUS_CLOUD_SWIRL_SPEED_DEFAULT = venusAppearanceDefaults.clouds?.swirlSpeed ?? 0.14
+  const VENUS_CLOUD_NIGHT_SIDE_FLOOR_DEFAULT = venusAppearanceDefaults.clouds?.nightSideFloor ?? 0.12
+
+  const [venusCloudOpacity, setVenusCloudOpacity] = useState(VENUS_CLOUD_OPACITY_DEFAULT)
+  const [venusCloudDriftDegPerSec, setVenusCloudDriftDegPerSec] = useState(VENUS_CLOUD_DRIFT_DEG_PER_SEC_DEFAULT)
+  const [venusHazeIntensity, setVenusHazeIntensity] = useState(VENUS_HAZE_INTENSITY_DEFAULT)
+  const [venusAtmosphereRimPower, setVenusAtmosphereRimPower] = useState(VENUS_ATMOSPHERE_RIM_POWER_DEFAULT)
+  const [venusAtmosphereSunBias, setVenusAtmosphereSunBias] = useState(VENUS_ATMOSPHERE_SUN_BIAS_DEFAULT)
+  const [venusAtmosphereRadiusRatio, setVenusAtmosphereRadiusRatio] = useState(VENUS_ATMOSPHERE_RADIUS_RATIO_DEFAULT)
+  const [venusAerosolRimPower, setVenusAerosolRimPower] = useState(VENUS_AEROSOL_RIM_POWER_DEFAULT)
+  const [venusAerosolSunBias, setVenusAerosolSunBias] = useState(VENUS_AEROSOL_SUN_BIAS_DEFAULT)
+  const [venusAerosolRadiusRatio, setVenusAerosolRadiusRatio] = useState(VENUS_AEROSOL_RADIUS_RATIO_DEFAULT)
+  const [venusCloudSwirlAmount, setVenusCloudSwirlAmount] = useState(VENUS_CLOUD_SWIRL_AMOUNT_DEFAULT)
+  const [venusCloudSwirlScale, setVenusCloudSwirlScale] = useState(VENUS_CLOUD_SWIRL_SCALE_DEFAULT)
+  const [venusCloudSwirlSpeed, setVenusCloudSwirlSpeed] = useState(VENUS_CLOUD_SWIRL_SPEED_DEFAULT)
+  const [venusCloudNightSideFloor, setVenusCloudNightSideFloor] = useState(VENUS_CLOUD_NIGHT_SIDE_FLOOR_DEFAULT)
 
   // Render HUD toggle (ephemeral, not persisted)
   const [showRenderHud, setShowRenderHud] = useState(false)
@@ -844,6 +934,20 @@ export function SceneCanvas() {
         earthNightLightsIntensity: number
         earthAtmosphereIntensity: number
         earthCloudsNightMultiplier: number
+
+        venusCloudOpacity: number
+        venusCloudDriftDegPerSec: number
+        venusHazeIntensity: number
+        venusAtmosphereRimPower: number
+        venusAtmosphereSunBias: number
+        venusAtmosphereRadiusRatio: number
+        venusAerosolRimPower: number
+        venusAerosolSunBias: number
+        venusAerosolRadiusRatio: number
+        venusCloudSwirlAmount: number
+        venusCloudSwirlScale: number
+        venusCloudSwirlSpeed: number
+        venusCloudNightSideFloor: number
       }) => void | Promise<void>)
     | null
   >(null)
@@ -875,6 +979,19 @@ export function SceneCanvas() {
     earthNightLightsIntensity,
     earthAtmosphereIntensity,
     earthCloudsNightMultiplier,
+    venusCloudOpacity,
+    venusCloudDriftDegPerSec,
+    venusHazeIntensity,
+    venusAtmosphereRimPower,
+    venusAtmosphereSunBias,
+    venusAtmosphereRadiusRatio,
+    venusAerosolRimPower,
+    venusAerosolSunBias,
+    venusAerosolRadiusRatio,
+    venusCloudSwirlAmount,
+    venusCloudSwirlScale,
+    venusCloudSwirlSpeed,
+    venusCloudNightSideFloor,
   })
   latestUiRef.current = {
     focusBody,
@@ -901,6 +1018,19 @@ export function SceneCanvas() {
     earthNightLightsIntensity,
     earthAtmosphereIntensity,
     earthCloudsNightMultiplier,
+    venusCloudOpacity,
+    venusCloudDriftDegPerSec,
+    venusHazeIntensity,
+    venusAtmosphereRimPower,
+    venusAtmosphereSunBias,
+    venusAtmosphereRadiusRatio,
+    venusAerosolRimPower,
+    venusAerosolSunBias,
+    venusAerosolRadiusRatio,
+    venusCloudSwirlAmount,
+    venusCloudSwirlScale,
+    venusCloudSwirlSpeed,
+    venusCloudNightSideFloor,
   }
 
   // Subscribe to time store changes and update the scene (without React rerenders)
@@ -940,6 +1070,19 @@ export function SceneCanvas() {
       earthNightLightsIntensity,
       earthAtmosphereIntensity,
       earthCloudsNightMultiplier,
+      venusCloudOpacity,
+      venusCloudDriftDegPerSec,
+      venusHazeIntensity,
+      venusAtmosphereRimPower,
+      venusAtmosphereSunBias,
+      venusAtmosphereRadiusRatio,
+      venusAerosolRimPower,
+      venusAerosolSunBias,
+      venusAerosolRadiusRatio,
+      venusCloudSwirlAmount,
+      venusCloudSwirlScale,
+      venusCloudSwirlSpeed,
+      venusCloudNightSideFloor,
     })
   }, [
     focusBody,
@@ -964,6 +1107,19 @@ export function SceneCanvas() {
     earthNightLightsIntensity,
     earthAtmosphereIntensity,
     earthCloudsNightMultiplier,
+    venusCloudOpacity,
+    venusCloudDriftDegPerSec,
+    venusHazeIntensity,
+    venusAtmosphereRimPower,
+    venusAtmosphereSunBias,
+    venusAtmosphereRadiusRatio,
+    venusAerosolRimPower,
+    venusAerosolSunBias,
+    venusAerosolRadiusRatio,
+    venusCloudSwirlAmount,
+    venusCloudSwirlScale,
+    venusCloudSwirlSpeed,
+    venusCloudNightSideFloor,
   ])
 
   // Imperatively update camera FOV when the slider changes
@@ -1829,170 +1985,369 @@ export function SceneCanvas() {
                     id={`${controlsTabsId}-panel-rendering`}
                     aria-labelledby={`${controlsTabsId}-tab-rendering`}
                   >
-                    <div className="controlsSection">
-                      <button
-                        className="asciiBtn asciiBtnWide"
-                        type="button"
-                        onClick={() => {
-                          setSunPostprocessExposure(sunExposure)
-                          setSunPostprocessToneMap(sunToneMap)
-                          setSunPostprocessBloomThreshold(sunBloomThreshold)
-                          setSunPostprocessBloomStrength(sunBloomStrength)
-                          setSunPostprocessBloomRadius(sunBloomRadius)
-                          setSunPostprocessBloomResolutionScale(sunBloomResolutionScale)
-                          setAmbientLightIntensity(AMBIENT_LIGHT_INTENSITY_DEFAULT)
-                          setSunLightIntensity(SUN_LIGHT_INTENSITY_DEFAULT)
-                          setSunEmissiveIntensity(SUN_EMISSIVE_INTENSITY_DEFAULT)
-                          setSunEmissiveColor(SUN_EMISSIVE_COLOR_DEFAULT)
-                        }}
-                        title="Reset rendering settings"
-                      >
-                        <span className="asciiBtnBracket">[</span>
-                        <span className="asciiBtnContent">Reset</span>
-                        <span className="asciiBtnBracket">]</span>
-                      </button>
-                    </div>
-
-                    <div className="advancedDivider" />
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Exposure</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={10}
-                        step={0.01}
-                        value={sunPostprocessExposure}
-                        onChange={(e) => setSunPostprocessExposure(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{sunPostprocessExposure.toFixed(2)}</span>
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Tone map</span>
-                      <select
-                        className="focusSelect"
-                        value={sunPostprocessToneMap}
-                        onChange={(e) => setSunPostprocessToneMap(e.target.value as typeof sunToneMap)}
-                      >
-                        <option value="none">none</option>
-                        <option value="filmic">filmic</option>
-                        <option value="acesLike">acesLike</option>
-                      </select>
-                      <span className="advancedSliderValue" />
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Bloom threshold</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={5}
-                        step={0.01}
-                        value={sunPostprocessBloomThreshold}
-                        onChange={(e) => setSunPostprocessBloomThreshold(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{sunPostprocessBloomThreshold.toFixed(2)}</span>
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Bloom strength</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={2}
-                        step={0.01}
-                        value={sunPostprocessBloomStrength}
-                        onChange={(e) => setSunPostprocessBloomStrength(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{sunPostprocessBloomStrength.toFixed(2)}</span>
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Bloom radius</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={sunPostprocessBloomRadius}
-                        onChange={(e) => setSunPostprocessBloomRadius(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{sunPostprocessBloomRadius.toFixed(2)}</span>
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Bloom res scale</span>
-                      <input
-                        type="range"
-                        min={0.1}
-                        max={1}
-                        step={0.05}
-                        value={sunPostprocessBloomResolutionScale}
-                        onChange={(e) => setSunPostprocessBloomResolutionScale(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{sunPostprocessBloomResolutionScale.toFixed(2)}</span>
-                    </div>
-
-                    <div className="advancedDivider" />
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Ambient light</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={2}
-                        step={0.01}
-                        value={ambientLightIntensity}
-                        onChange={(e) => setAmbientLightIntensity(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{ambientLightIntensity.toFixed(2)}</span>
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Sun light</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={10}
-                        step={0.1}
-                        value={sunLightIntensity}
-                        onChange={(e) => setSunLightIntensity(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{sunLightIntensity.toFixed(1)}</span>
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Sun emissive</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={20}
-                        step={0.1}
-                        value={sunEmissiveIntensity}
-                        onChange={(e) => setSunEmissiveIntensity(Number(e.target.value))}
-                      />
-                      <span className="advancedSliderValue">{sunEmissiveIntensity.toFixed(1)}</span>
-                    </div>
-
-                    <div className="advancedSlider">
-                      <span className="advancedSliderLabel">Emissive color</span>
-                      <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
-                        <input
-                          type="color"
-                          value={sunEmissiveColor}
-                          onChange={(e) => setSunEmissiveColor(e.target.value)}
-                          aria-label="Sun emissive color"
-                        />
-                        <input
-                          className="advancedTextInput"
-                          type="text"
-                          value={sunEmissiveColor}
-                          onChange={(e) => setSunEmissiveColor(e.target.value)}
-                        />
+                    <RenderingCollapsibleGroup
+                      id={`${controlsTabsId}-rendering-group-postprocess`}
+                      title="Postprocess"
+                      open={renderingGroupOpen.postprocess}
+                      onToggle={() => toggleRenderingGroup('postprocess')}
+                    >
+                      <div className="controlsSection">
+                        <button
+                          className="asciiBtn asciiBtnWide"
+                          type="button"
+                          onClick={() => {
+                            setSunPostprocessExposure(sunExposure)
+                            setSunPostprocessToneMap(sunToneMap)
+                            setSunPostprocessBloomThreshold(sunBloomThreshold)
+                            setSunPostprocessBloomStrength(sunBloomStrength)
+                            setSunPostprocessBloomRadius(sunBloomRadius)
+                            setSunPostprocessBloomResolutionScale(sunBloomResolutionScale)
+                            setAmbientLightIntensity(AMBIENT_LIGHT_INTENSITY_DEFAULT)
+                            setSunLightIntensity(SUN_LIGHT_INTENSITY_DEFAULT)
+                            setSunEmissiveIntensity(SUN_EMISSIVE_INTENSITY_DEFAULT)
+                            setSunEmissiveColor(SUN_EMISSIVE_COLOR_DEFAULT)
+                            setVenusCloudOpacity(VENUS_CLOUD_OPACITY_DEFAULT)
+                            setVenusCloudDriftDegPerSec(VENUS_CLOUD_DRIFT_DEG_PER_SEC_DEFAULT)
+                            setVenusHazeIntensity(VENUS_HAZE_INTENSITY_DEFAULT)
+                            setVenusAtmosphereRimPower(VENUS_ATMOSPHERE_RIM_POWER_DEFAULT)
+                            setVenusAtmosphereSunBias(VENUS_ATMOSPHERE_SUN_BIAS_DEFAULT)
+                            setVenusAtmosphereRadiusRatio(VENUS_ATMOSPHERE_RADIUS_RATIO_DEFAULT)
+                            setVenusAerosolRimPower(VENUS_AEROSOL_RIM_POWER_DEFAULT)
+                            setVenusAerosolSunBias(VENUS_AEROSOL_SUN_BIAS_DEFAULT)
+                            setVenusAerosolRadiusRatio(VENUS_AEROSOL_RADIUS_RATIO_DEFAULT)
+                            setVenusCloudSwirlAmount(VENUS_CLOUD_SWIRL_AMOUNT_DEFAULT)
+                            setVenusCloudSwirlScale(VENUS_CLOUD_SWIRL_SCALE_DEFAULT)
+                            setVenusCloudSwirlSpeed(VENUS_CLOUD_SWIRL_SPEED_DEFAULT)
+                            setVenusCloudNightSideFloor(VENUS_CLOUD_NIGHT_SIDE_FLOOR_DEFAULT)
+                          }}
+                          title="Reset rendering settings"
+                        >
+                          <span className="asciiBtnBracket">[</span>
+                          <span className="asciiBtnContent">Reset</span>
+                          <span className="asciiBtnBracket">]</span>
+                        </button>
                       </div>
-                      <span className="advancedSliderValue" />
-                    </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Exposure</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          step={0.01}
+                          value={sunPostprocessExposure}
+                          onChange={(e) => setSunPostprocessExposure(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{sunPostprocessExposure.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Tone map</span>
+                        <select
+                          className="focusSelect"
+                          value={sunPostprocessToneMap}
+                          onChange={(e) => setSunPostprocessToneMap(e.target.value as typeof sunToneMap)}
+                        >
+                          <option value="none">none</option>
+                          <option value="filmic">filmic</option>
+                          <option value="acesLike">acesLike</option>
+                        </select>
+                        <span className="advancedSliderValue" />
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Bloom threshold</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={5}
+                          step={0.01}
+                          value={sunPostprocessBloomThreshold}
+                          onChange={(e) => setSunPostprocessBloomThreshold(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{sunPostprocessBloomThreshold.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Bloom strength</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={0.01}
+                          value={sunPostprocessBloomStrength}
+                          onChange={(e) => setSunPostprocessBloomStrength(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{sunPostprocessBloomStrength.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Bloom radius</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={sunPostprocessBloomRadius}
+                          onChange={(e) => setSunPostprocessBloomRadius(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{sunPostprocessBloomRadius.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Bloom res scale</span>
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={1}
+                          step={0.05}
+                          value={sunPostprocessBloomResolutionScale}
+                          onChange={(e) => setSunPostprocessBloomResolutionScale(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{sunPostprocessBloomResolutionScale.toFixed(2)}</span>
+                      </div>
+                    </RenderingCollapsibleGroup>
+
+                    <RenderingCollapsibleGroup
+                      id={`${controlsTabsId}-rendering-group-lighting`}
+                      title="Lighting"
+                      open={renderingGroupOpen.lighting}
+                      onToggle={() => toggleRenderingGroup('lighting')}
+                    >
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Ambient light</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={0.01}
+                          value={ambientLightIntensity}
+                          onChange={(e) => setAmbientLightIntensity(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{ambientLightIntensity.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Sun light</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={10}
+                          step={0.1}
+                          value={sunLightIntensity}
+                          onChange={(e) => setSunLightIntensity(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{sunLightIntensity.toFixed(1)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Sun emissive</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={20}
+                          step={0.1}
+                          value={sunEmissiveIntensity}
+                          onChange={(e) => setSunEmissiveIntensity(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{sunEmissiveIntensity.toFixed(1)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Emissive color</span>
+                        <div style={{ flex: 1, display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <input
+                            type="color"
+                            value={sunEmissiveColor}
+                            onChange={(e) => setSunEmissiveColor(e.target.value)}
+                            aria-label="Sun emissive color"
+                          />
+                          <input
+                            className="advancedTextInput"
+                            type="text"
+                            value={sunEmissiveColor}
+                            onChange={(e) => setSunEmissiveColor(e.target.value)}
+                          />
+                        </div>
+                        <span className="advancedSliderValue" />
+                      </div>
+                    </RenderingCollapsibleGroup>
+
+                    <RenderingCollapsibleGroup
+                      id={`${controlsTabsId}-rendering-group-venus`}
+                      title="Venus"
+                      open={renderingGroupOpen.venus}
+                      onToggle={() => toggleRenderingGroup('venus')}
+                    >
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Cloud opacity</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={1.0}
+                          step={0.01}
+                          value={venusCloudOpacity}
+                          onChange={(e) => setVenusCloudOpacity(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusCloudOpacity.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Cloud drift (deg/s)</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={2.0}
+                          step={0.01}
+                          value={venusCloudDriftDegPerSec}
+                          onChange={(e) => setVenusCloudDriftDegPerSec(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusCloudDriftDegPerSec.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Haze intensity</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={2.0}
+                          step={0.01}
+                          value={venusHazeIntensity}
+                          onChange={(e) => setVenusHazeIntensity(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusHazeIntensity.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Atmosphere rim power</span>
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={10.0}
+                          step={0.1}
+                          value={venusAtmosphereRimPower}
+                          onChange={(e) => setVenusAtmosphereRimPower(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusAtmosphereRimPower.toFixed(1)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Atmosphere sun bias</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={1.0}
+                          step={0.01}
+                          value={venusAtmosphereSunBias}
+                          onChange={(e) => setVenusAtmosphereSunBias(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusAtmosphereSunBias.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Atmosphere radius ratio</span>
+                        <input
+                          type="range"
+                          min={1.001}
+                          max={1.25}
+                          step={0.001}
+                          value={venusAtmosphereRadiusRatio}
+                          onChange={(e) => setVenusAtmosphereRadiusRatio(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusAtmosphereRadiusRatio.toFixed(3)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Aerosol rim power</span>
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={10.0}
+                          step={0.1}
+                          value={venusAerosolRimPower}
+                          onChange={(e) => setVenusAerosolRimPower(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusAerosolRimPower.toFixed(1)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Aerosol sun bias</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={1.0}
+                          step={0.01}
+                          value={venusAerosolSunBias}
+                          onChange={(e) => setVenusAerosolSunBias(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusAerosolSunBias.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Aerosol radius ratio</span>
+                        <input
+                          type="range"
+                          min={1.001}
+                          max={1.25}
+                          step={0.001}
+                          value={venusAerosolRadiusRatio}
+                          onChange={(e) => setVenusAerosolRadiusRatio(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusAerosolRadiusRatio.toFixed(3)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Cloud swirl amount</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={0.3}
+                          step={0.001}
+                          value={venusCloudSwirlAmount}
+                          onChange={(e) => setVenusCloudSwirlAmount(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusCloudSwirlAmount.toFixed(3)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Cloud swirl scale</span>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={8.0}
+                          step={0.01}
+                          value={venusCloudSwirlScale}
+                          onChange={(e) => setVenusCloudSwirlScale(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusCloudSwirlScale.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Cloud swirl speed</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={1.0}
+                          step={0.01}
+                          value={venusCloudSwirlSpeed}
+                          onChange={(e) => setVenusCloudSwirlSpeed(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusCloudSwirlSpeed.toFixed(2)}</span>
+                      </div>
+
+                      <div className="advancedSlider">
+                        <span className="advancedSliderLabel">Cloud night-side floor</span>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={0.4}
+                          step={0.01}
+                          value={venusCloudNightSideFloor}
+                          onChange={(e) => setVenusCloudNightSideFloor(Number(e.target.value))}
+                        />
+                        <span className="advancedSliderValue">{venusCloudNightSideFloor.toFixed(2)}</span>
+                      </div>
+                    </RenderingCollapsibleGroup>
                   </div>
                 ) : null}
               </div>
