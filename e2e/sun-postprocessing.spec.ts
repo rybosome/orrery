@@ -25,18 +25,47 @@ const setupDeterminismAndNetworkBlock = async (page: any, baseURL?: string) => {
   })
 }
 
+const waitForViewerReadyForScreenshot = async (
+  page: any,
+  opts?: { renders?: number; timeoutMs?: number },
+) => {
+  const timeoutMs = opts?.timeoutMs ?? 30_000
+
+  await page.waitForFunction(
+    () => {
+      const viewer = window as any
+      const pendingTextureLoads = viewer.__tspice_viewer__pending_texture_loads
+      return (
+        viewer.__tspice_viewer__rendered_scene === true &&
+        (pendingTextureLoads == null || pendingTextureLoads === 0)
+      )
+    },
+    undefined,
+    { timeout: timeoutMs },
+  )
+
+  // In CI we occasionally observed screenshots taken before async textures were
+  // fully uploaded/visible. Force a few synchronous renders via the e2e API to
+  // ensure the current frame reflects final assets.
+  await page.waitForFunction(() => (window as any).__tspice_viewer__e2e?.renderNTimes != null, undefined, {
+    timeout: timeoutMs,
+  })
+
+  const renders = opts?.renders ?? 2
+
+  await page.evaluate(async (renders) => {
+    const api = (window as any).__tspice_viewer__e2e
+    if (!api?.renderNTimes) throw new Error('Missing e2e API: renderNTimes')
+    await api.renderNTimes(renders)
+  }, renders)
+}
+
 test('sun postprocessing: whole-frame bloom + tonemap', async ({ page, baseURL }) => {
   await setupDeterminismAndNetworkBlock(page, baseURL)
 
   await page.goto('/?e2e=1&et=1234567&sunPostprocessMode=wholeFrame&sunToneMap=filmic')
 
-  await page.waitForFunction(
-    () =>
-      (window as any).__tspice_viewer__rendered_scene === true &&
-      ((window as any).__tspice_viewer__pending_texture_loads ?? 0) === 0,
-    undefined,
-    { timeout: 30_000 },
-  )
+  await waitForViewerReadyForScreenshot(page)
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()
@@ -53,13 +82,7 @@ test('sun postprocessing: sun-isolated selective bloom + tonemap', async ({ page
 
   await page.goto('/?e2e=1&et=1234567&sunPostprocessMode=sunIsolated&sunToneMap=filmic')
 
-  await page.waitForFunction(
-    () =>
-      (window as any).__tspice_viewer__rendered_scene === true &&
-      ((window as any).__tspice_viewer__pending_texture_loads ?? 0) === 0,
-    undefined,
-    { timeout: 30_000 },
-  )
+  await waitForViewerReadyForScreenshot(page)
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()
@@ -76,21 +99,13 @@ test('sun postprocessing: sun-isolated selective bloom (default tonemap)', async
   // Intentionally omit `sunToneMap` so we cover the `sunIsolated` default (none).
   await page.goto('/?e2e=1&et=1234567&sunPostprocessMode=sunIsolated')
 
-  await page.waitForFunction(
-    () =>
-      (window as any).__tspice_viewer__rendered_scene === true &&
-      ((window as any).__tspice_viewer__pending_texture_loads ?? 0) === 0,
-    undefined,
-    { timeout: 30_000 },
-  )
+  await waitForViewerReadyForScreenshot(page, { renders: 8 })
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()
 
   await expect(canvas).toHaveScreenshot('sun-postprocess-sun-isolated-default-tonemap.png', {
     animations: 'disabled',
-    // Minor GPU + driver differences sometimes push this over 0.06 on ubuntu runners.
-    // Keep this stricter than the whole-frame bloom test, but allow a bit more slack.
-    maxDiffPixelRatio: 0.08,
+    maxDiffPixelRatio: 0.06,
   })
 })
