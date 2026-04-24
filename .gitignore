@@ -27,4 +27,4 @@ dist-ssr
 playwright-report/
 
 # Generated from node_modules at install/build time
-public/backend-wasm/dist/
+public/static/backend-wasm/dist/

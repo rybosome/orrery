@@ -4,8 +4,8 @@
  * (PDS dataset: MGS-M-MOLA-5-MEGDR-L3-V1.0).
  *
  * Outputs:
- * - public/textures/planets/mars-mola-normal-2k.png
- * - public/textures/planets/mars-roughness-proxy-2k.png
+* - public/static/textures/planets/mars-mola-normal-2k.png
+* - public/static/textures/planets/mars-roughness-proxy-2k.png
  *
  * Roughness is a proxy intended to be "mostly matte" (values near 1.0) with subtle
  * large-scale variation from:
@@ -37,7 +37,7 @@ const MARS_RADIUS_M = 3_396_000
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const orreryDir = path.resolve(scriptDir, '..')
-const texturesDir = path.join(orreryDir, 'public', 'textures', 'planets')
+const texturesDir = path.join(orreryDir, 'public', 'static', 'textures', 'planets')
 const dataDir = path.join(scriptDir, 'data', 'mars-mola')
 
 const molaImgPath = path.join(dataDir, 'megt90n000eb.img')
@@ -292,7 +292,7 @@ async function main() {
   const albedoRepoPath = path.relative(orreryDir, albedoPath)
   if (!(await pathExists(albedoPath))) {
     throw new Error(
-      `Missing required albedo input file: ${albedoRepoPath}. In this standalone repo it should be at public/textures/planets/mars-viking-colorized-4k.jpg`,
+      `Missing required albedo input file: ${albedoRepoPath}. In this standalone repo it should be at public/static/textures/planets/mars-viking-colorized-4k.jpg`,
     )
   }
 

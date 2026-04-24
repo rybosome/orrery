@@ -1,1 +1,2 @@
+/static/*  /static/:splat  200
 /s/*  /index.html  200

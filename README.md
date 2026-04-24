@@ -13,7 +13,7 @@ From repo root:
 
 ## NAIF kernels
 
-This viewer ships a small set of **NAIF Generic Kernels** as static assets under `public/kernels/naif/`:
+This viewer ships a small set of **NAIF Generic Kernels** as static assets under `public/static/kernels/naif/`:
 
 - `lsk/naif0012.tls` (LSK)
 - `pck/pck00011.tpc` (PCK)

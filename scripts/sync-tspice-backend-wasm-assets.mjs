@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const sourceDir = path.join(repoRoot, 'node_modules', '@rybosome', 'tspice', 'backend-wasm', 'dist')
-const targetDir = path.join(repoRoot, 'public', 'backend-wasm', 'dist')
+const targetDir = path.join(repoRoot, 'public', 'static', 'backend-wasm', 'dist')
 
 if (!fs.existsSync(sourceDir)) {
   throw new Error(`Missing source assets at ${sourceDir}. Run \`pnpm install\` first.`)

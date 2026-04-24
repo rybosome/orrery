@@ -12,6 +12,8 @@ export type ViewerSpiceClientBundle = {
  * Viewer entrypoint for initializing a worker-backed `SpiceAsync` client.
  */
 export async function createSpiceClient(): Promise<ViewerSpiceClientBundle> {
+  const runtimeBaseUrl = new URL(import.meta.env.BASE_URL, window.location.href)
+  const staticWasmUrl = new URL('static/backend-wasm/dist/tspice_backend_wasm.wasm', runtimeBaseUrl).toString()
 
   const NAIF_KERNEL_IDS = [
     'lsk/naif0012.tls',
@@ -21,7 +23,7 @@ export async function createSpiceClient(): Promise<ViewerSpiceClientBundle> {
 
   const pack = kernels
     .naif({
-      origin: 'kernels/naif/',
+      origin: 'static/kernels/naif/',
       // Important for apps deployed under a subpath (GitHub Pages, etc).
       // Vite's BASE_URL is typically already directory-style (ends with '/').
       baseUrl: import.meta.env.BASE_URL,
@@ -38,7 +40,7 @@ export async function createSpiceClient(): Promise<ViewerSpiceClientBundle> {
       ttlMs: null,
     })
     .withKernels(pack)
-    .toWebWorker()
+    .toWebWorker({ wasmUrl: staticWasmUrl })
 
   const dispose = (): void => {
     void disposeAsync().catch((err) => console.warn('Spice worker dispose failed', err))
