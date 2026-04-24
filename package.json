@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@rybosome/tspice": "0.0.8",
+    "fflate": "^0.8.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "0.160.1"

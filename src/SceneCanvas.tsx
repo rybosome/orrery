@@ -29,6 +29,8 @@ import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRun
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
 import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/initSpiceSceneRuntime.js'
 import { isEarthAppearanceLayer } from './scene/SceneModel.js'
+import { applySnapshot, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
+import { snapshotCameraToControllerState, type SceneSnapshotV1 } from './snapshot/sceneSnapshot.js'
 
 type AdvancedPaneId = 'time' | 'scale' | 'guides' | 'orbits' | 'performance' | 'rendering'
 
@@ -250,6 +252,11 @@ const CAMERA_RADIUS_LIMITS = {
   maxRadius: HOME_PRESET_RADIUS_MAX * 20_000,
 } as const
 
+type SceneSnapshotBindings = {
+  captureSnapshot: () => SceneSnapshotV1 | null
+  applySnapshot: (snapshot: SceneSnapshotV1) => Promise<SceneSnapshotV1>
+}
+
 /**
  * Main Three.js scene canvas + runtime initializer for the orrery app.
  */
@@ -267,6 +274,7 @@ export function SceneCanvas() {
   const cancelFocusTweenRef = useRef<(() => void) | null>(null)
 
   const rendererRuntimeRef = useRef<ThreeRuntime | null>(null)
+  const sceneSnapshotBindingsRef = useRef<SceneSnapshotBindings | null>(null)
 
   const runtimeConfig = useMemo(() => parseSceneCanvasRuntimeConfigFromLocationSearch(window.location.search), [])
 
@@ -901,6 +909,200 @@ export function SceneCanvas() {
     earthNightLightsIntensity,
     earthAtmosphereIntensity,
     earthCloudsNightMultiplier,
+  }
+
+  const captureSceneSnapshot = useCallback((): SceneSnapshotV1 | null => {
+    const controller = controllerRef.current
+    if (!controller) return null
+
+    return captureSnapshot({
+      controller,
+      focusBody,
+      time: timeStore.getState(),
+      scale: {
+        cameraFovDeg,
+        sunScaleMultiplier,
+        planetScaleMultiplier,
+      },
+      guides: {
+        showJ2000Axes,
+        showBodyFixedAxes,
+        labelsEnabled,
+        labelOcclusionEnabled,
+      },
+      orbitPaths: {
+        enabled: orbitPathsEnabled,
+        lineWidthPx: orbitLineWidthPx,
+        samplesPerOrbit: orbitSamplesPerOrbit,
+        maxTotalPoints: orbitMaxTotalPoints,
+      },
+      system: {
+        animatedSky,
+        skyTwinkle,
+        showRenderHud,
+      },
+      rendering: {
+        ambientLightIntensity,
+        sunLightIntensity,
+        sunEmissiveIntensity,
+        sunEmissiveColor,
+        sunPostprocessExposure,
+        sunPostprocessToneMap,
+        sunPostprocessBloomThreshold,
+        sunPostprocessBloomStrength,
+        sunPostprocessBloomRadius,
+        sunPostprocessBloomResolutionScale,
+      },
+    })
+  }, [
+    focusBody,
+    cameraFovDeg,
+    sunScaleMultiplier,
+    planetScaleMultiplier,
+    showJ2000Axes,
+    showBodyFixedAxes,
+    labelsEnabled,
+    labelOcclusionEnabled,
+    orbitPathsEnabled,
+    orbitLineWidthPx,
+    orbitSamplesPerOrbit,
+    orbitMaxTotalPoints,
+    animatedSky,
+    skyTwinkle,
+    showRenderHud,
+    ambientLightIntensity,
+    sunLightIntensity,
+    sunEmissiveIntensity,
+    sunEmissiveColor,
+    sunPostprocessExposure,
+    sunPostprocessToneMap,
+    sunPostprocessBloomThreshold,
+    sunPostprocessBloomStrength,
+    sunPostprocessBloomRadius,
+    sunPostprocessBloomResolutionScale,
+  ])
+
+  const applySceneSnapshot = useCallback(
+    async (snapshot: SceneSnapshotV1): Promise<SceneSnapshotV1> => {
+      const controller = controllerRef.current
+      const camera = cameraRef.current
+      if (!controller || !camera) return snapshot
+
+      return applySnapshot(snapshot, {
+        cancelFocusTween: () => cancelFocusTweenRef.current?.(),
+        setSkipAutoZoomForFocusBody: (nextFocusBody) => {
+          skipAutoZoomForNextFocusBodyRef.current = nextFocusBody
+        },
+
+        applyScale: (next) => {
+          setCameraFovDeg(next.cameraFovDeg)
+          setSunScaleMultiplier(next.sunScaleMultiplier)
+          setPlanetScaleSlider(planetScaleSliderForMultiplier(next.planetScaleMultiplier))
+        },
+
+        applyGuides: (next) => {
+          setShowJ2000Axes(next.showJ2000Axes)
+          setShowBodyFixedAxes(next.showBodyFixedAxes)
+          setLabelsEnabled(next.labelsEnabled)
+          setLabelOcclusionEnabled(next.labelOcclusionEnabled)
+        },
+
+        applyOrbitPaths: (next) => {
+          setOrbitPathsEnabled(next.enabled)
+          setOrbitLineWidthPx(next.lineWidthPx)
+          setOrbitSamplesPerOrbit(next.samplesPerOrbit)
+          setOrbitMaxTotalPoints(next.maxTotalPoints)
+        },
+
+        applySystem: (next) => {
+          setAnimatedSky(next.animatedSky)
+          setSkyTwinkle(next.skyTwinkle)
+          setShowRenderHud(next.showRenderHud)
+        },
+
+        applyRendering: (next) => {
+          setAmbientLightIntensity(next.ambientLightIntensity)
+          setSunLightIntensity(next.sunLightIntensity)
+          setSunEmissiveIntensity(next.sunEmissiveIntensity)
+          setSunEmissiveColor(next.sunEmissiveColor)
+
+          setSunPostprocessExposure(next.sunPostprocessExposure)
+          setSunPostprocessToneMap(next.sunPostprocessToneMap)
+          setSunPostprocessBloomThreshold(next.sunPostprocessBloomThreshold)
+          setSunPostprocessBloomStrength(next.sunPostprocessBloomStrength)
+          setSunPostprocessBloomRadius(next.sunPostprocessBloomRadius)
+          setSunPostprocessBloomResolutionScale(next.sunPostprocessBloomResolutionScale)
+        },
+
+        applyFocusBody: (nextFocusBody) => {
+          setFocusBody(nextFocusBody)
+        },
+
+        applyPlayer: (next) => {
+          timeStore.setScrubRange(next.scrubMinEtSec, next.scrubMaxEtSec)
+          timeStore.setQuantumSec(next.quantumSec)
+          timeStore.setStepSec(next.stepSec)
+          timeStore.setEtSec(next.etSec)
+          timeStore.setRate(next.rateSecPerSec)
+        },
+
+        flushSceneUpdate: async (next) => {
+          const update = updateSceneRef.current
+          if (!update) return
+
+          await update({
+            etSec: next.player.etSec,
+            focusBody: next.focusBody,
+            showJ2000Axes: next.guides.showJ2000Axes,
+            showBodyFixedAxes: next.guides.showBodyFixedAxes,
+            cameraFovDeg: next.scale.cameraFovDeg,
+            sunScaleMultiplier: next.scale.sunScaleMultiplier,
+            planetScaleMultiplier: next.scale.planetScaleMultiplier,
+
+            orbitLineWidthPx: next.orbitPaths.lineWidthPx,
+            orbitSamplesPerOrbit: next.orbitPaths.samplesPerOrbit,
+            orbitMaxTotalPoints: next.orbitPaths.maxTotalPoints,
+            orbitPathsEnabled: next.orbitPaths.enabled,
+            labelsEnabled: next.guides.labelsEnabled,
+            labelOcclusionEnabled: next.guides.labelOcclusionEnabled,
+
+            ambientLightIntensity: next.rendering.ambientLightIntensity,
+            sunLightIntensity: next.rendering.sunLightIntensity,
+            sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
+            sunEmissiveColor: next.rendering.sunEmissiveColor,
+
+            earthNightAlbedo,
+            earthTwilight,
+            earthNightLightsIntensity,
+            earthAtmosphereIntensity,
+            earthCloudsNightMultiplier,
+          })
+        },
+
+        applyCamera: (nextCamera) => {
+          controller.restore(snapshotCameraToControllerState(nextCamera))
+          controller.applyToCamera(camera)
+          setZoomSlider(zoomSliderForRadius(controller.radius, controller.minRadius, controller.maxRadius))
+          invalidateRef.current?.()
+        },
+      })
+    },
+    [
+      planetScaleSliderForMultiplier,
+      earthNightAlbedo,
+      earthTwilight,
+      earthNightLightsIntensity,
+      earthAtmosphereIntensity,
+      earthCloudsNightMultiplier,
+      zoomSliderForRadius,
+    ],
+  )
+
+  // PR1 foundation integration only: this binds the adapter to live app state so
+  // follow-on PRs can wire URL capture/load without reworking ordering logic.
+  sceneSnapshotBindingsRef.current = {
+    captureSnapshot: captureSceneSnapshot,
+    applySnapshot: applySceneSnapshot,
   }
 
   // Subscribe to time store changes and update the scene (without React rerenders)
