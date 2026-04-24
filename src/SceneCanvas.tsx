@@ -290,13 +290,11 @@ export function SceneCanvas() {
   const runtimeConfig = useMemo(() => parseSceneCanvasRuntimeConfigFromLocationSearch(window.location.search), [])
 
   const {
-    searchParams: search,
     isE2e,
     enableLogDepth,
     starSeed,
     animatedSky: animatedSkyDefault,
     skyTwinkle: skyTwinkleDefault,
-    initialUtc,
     initialEt,
     sunPostprocessMode,
     sunExposure,
@@ -447,11 +445,9 @@ export function SceneCanvas() {
   // The renderer/bootstrap `useEffect` is mounted once, so capture the initial
   // runtime config it needs without having to re-run on UI toggles.
   const initRuntimeConfigRef = useRef({
-    search,
     isE2e,
     enableLogDepth,
     starSeed,
-    initialUtc,
     initialEt,
     sunPostprocessMode,
     sunExposure,
@@ -1233,7 +1229,7 @@ export function SceneCanvas() {
     const container = containerRef.current
     if (!canvas || !container) return
 
-    const { search, isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialUtc, initialEt, kmToWorld } =
+    const { isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld } =
       initRuntimeConfigRef.current
 
     let disposed = false
@@ -1349,8 +1345,6 @@ export function SceneCanvas() {
       try {
         const runtime = await initSpiceSceneRuntime({
           isE2e,
-          searchParams: search,
-          initialUtc,
           initialEt,
           scene: three.scene,
           camera: three.camera,

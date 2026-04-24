@@ -22,7 +22,7 @@ describe('sceneSnapshotShare', () => {
       },
     }
 
-    const shareUrl = buildSnapshotShareUrlForLocation(snapshot, 'https://orrery.test/viewer?milkyWay=0#controls')
+    const shareUrl = buildSnapshotShareUrlForLocation(snapshot, 'https://orrery.test/viewer?legacyFlag=1#controls')
     const parsed = new URL(shareUrl)
 
     expect(parsed.origin).toBe('https://orrery.test')

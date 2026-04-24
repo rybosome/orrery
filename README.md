@@ -86,11 +86,16 @@ Implementation in `src/scene/precision.ts` + `src/SceneCanvas.tsx`:
 
 This keeps the camera and nearby bodies numerically close to the origin, improving effective precision.
 
-### Optional: logarithmic depth buffer
+### Debug/e2e query params (retained)
 
-You can opt-in to Three's logarithmic depth buffer with `?logDepth=1`.
+Scene sharing/state restoration should use snapshot paths (`/s/<payload>`). Query params are intentionally limited to explicit debug/e2e startup flags:
 
-This is **not** the primary precision strategy (it helps with depth range / z-fighting more than large-coordinate jitter), but it can be useful when experimenting with bigger far planes.
+- `?logDepth=1` (or presence): opt-in to Three's logarithmic depth buffer.
+  - This is **not** the primary precision strategy (it helps with depth range / z-fighting more than large-coordinate jitter), but it can be useful when experimenting with bigger far planes.
+- `?e2e=1` (or presence): enable deterministic e2e mode.
+- `?et=<number>`: e2e-only initial ET override.
+- `?sunPostprocessMode=off|wholeFrame|sunIsolated`: e2e-only boot override for postprocess mode.
+- `?sunToneMap=none|filmic|acesLike`: e2e-only boot override for tonemap selection.
 
 ## Viewer controls
 
