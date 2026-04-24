@@ -991,7 +991,11 @@ export function SceneCanvas() {
       return applySnapshot(snapshot, {
         cancelFocusTween: () => cancelFocusTweenRef.current?.(),
         setSkipAutoZoomForFocusBody: (nextFocusBody) => {
-          skipAutoZoomForNextFocusBodyRef.current = nextFocusBody
+          // Keep this one-shot token tightly scoped to real focus changes.
+          // If snapshot focus already matches current focus, don't arm a skip
+          // token that may never be consumed by updateScene.
+          skipAutoZoomForNextFocusBodyRef.current =
+            String(nextFocusBody) !== String(focusBodyRef.current) ? nextFocusBody : null
         },
 
         applyScale: (next) => {
