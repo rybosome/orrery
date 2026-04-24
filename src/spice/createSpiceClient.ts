@@ -11,12 +11,7 @@ export type ViewerSpiceClientBundle = {
 /**
  * Viewer entrypoint for initializing a worker-backed `SpiceAsync` client.
  */
-export async function createSpiceClient(
-  options: { searchParams?: URLSearchParams } = {},
-): Promise<ViewerSpiceClientBundle> {
-  // Keep URL parsing for other params (`?utc=...`, `?et=...`) in the caller.
-  // Currently `searchParams` isn't used here, but we keep the option for API stability.
-  void options
+export async function createSpiceClient(): Promise<ViewerSpiceClientBundle> {
 
   const NAIF_KERNEL_IDS = [
     'lsk/naif0012.tls',

@@ -73,8 +73,6 @@ export type SpiceSceneRuntime = {
  */
 export async function initSpiceSceneRuntime(args: {
   isE2e: boolean
-  searchParams: URLSearchParams
-  initialUtc: string | null
   initialEt: number | null
 
   scene: THREE.Scene
@@ -118,8 +116,6 @@ export async function initSpiceSceneRuntime(args: {
 }): Promise<SpiceSceneRuntime> {
   const {
     isE2e,
-    searchParams,
-    initialUtc,
     initialEt,
     scene,
     camera,
@@ -155,9 +151,7 @@ export async function initSpiceSceneRuntime(args: {
   scene.add(dir)
   sceneObjects.push(dir)
 
-  const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient({
-    searchParams,
-  })
+  const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient()
 
   disposers.push(disposeSpice)
 
@@ -174,19 +168,12 @@ export async function initSpiceSceneRuntime(args: {
   // IMPORTANT: set the viewer's scrub range only after kernels load so
   // `spice.kit.utcToEt` (SPICE `str2et`) is correct.
   //
-  // Also: do this *before* applying URL `?utc=`/`?et=` overrides, because
+  // Also: do this *before* applying any startup ET override, because
   // `timeStore.setEtSec` clamps to the current scrub range.
   const scrubRange = await computeViewerScrubRangeEt({ spice: cachedSpice })
   if (scrubRange) timeStore.setScrubRange(scrubRange.minEtSec, scrubRange.maxEtSec)
 
-  // Allow the URL to specify UTC for quick testing, but keep the slider
-  // driven by numeric ET.
-  if (initialUtc) {
-    const nextEt = await cachedSpice.kit.utcToEt(initialUtc)
-    if (!isDisposed()) timeStore.setEtSec(nextEt)
-  }
-
-  // Parse initial ET from URL if provided
+  // Optional e2e-only initial ET override from runtime config.
   if (initialEt != null) {
     if (!isDisposed()) timeStore.setEtSec(initialEt)
   }
