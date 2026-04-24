@@ -1,7 +1,7 @@
 import { decodeSnapshot, type SceneSnapshotDecodeResult } from './sceneSnapshotCodec.js'
 import type { SceneSnapshotV1 } from './sceneSnapshot.js'
 
-const SNAPSHOT_PATH_PREFIX = '/s/'
+export const SNAPSHOT_PATH_PREFIX = '/s/'
 
 type SnapshotDecodeErrorCode = Extract<SceneSnapshotDecodeResult, { ok: false }>['error']['code']
 
