@@ -804,6 +804,80 @@
   margin-left: auto;
 }
 
+.advancedSubsection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.advancedSubsectionHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.advancedSubsectionTitle {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  color: var(--phosphor-fg);
+  letter-spacing: 0.4px;
+}
+
+.advancedSubsectionSummary {
+  font-size: 11px;
+  color: var(--phosphor-dim);
+  line-height: 1.4;
+}
+
+.advancedSnapshotUrlBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.advancedSnapshotUrlLabel {
+  font-size: 11px;
+  color: var(--phosphor-dim);
+  font-family: var(--font-mono);
+}
+
+.advancedSnapshotUrlValue {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  background: var(--hover-bg);
+  border: var(--stroke-1) solid var(--phosphor-border);
+  border-radius: var(--radius-xs);
+  padding: 6px 8px;
+  color: var(--phosphor-fg);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  line-height: 1.4;
+}
+
+.advancedSnapshotCopyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.advancedSnapshotCopyStatus {
+  font-size: 11px;
+  color: var(--phosphor-dim);
+}
+
+.advancedSnapshotCopyStatusError {
+  color: var(--phosphor-bright);
+}
+
+.advancedTab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* --- Selection Inspector Panel --- */
 
 .selectionInspector {
