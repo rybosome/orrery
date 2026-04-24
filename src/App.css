@@ -215,6 +215,43 @@
   border-color: var(--active-border);
 }
 
+.sceneBootNotice {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: min(460px, calc(100% - 24px));
+  padding: 8px 10px;
+  background: var(--panel-bg);
+  border: var(--stroke-1) solid var(--active-border);
+  border-radius: var(--radius-xs);
+  backdrop-filter: blur(6px);
+  color: var(--phosphor-fg);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+}
+
+.sceneBootNoticeDismiss {
+  appearance: none;
+  border: var(--stroke-1) solid var(--phosphor-border);
+  background: transparent;
+  color: var(--phosphor-fg);
+  border-radius: var(--radius-xs);
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sceneBootNoticeDismiss:hover {
+  border-color: var(--phosphor-bright);
+  background: var(--hover-bg);
+}
+
 .sceneOverlayCheckbox {
   display: flex;
   align-items: center;
