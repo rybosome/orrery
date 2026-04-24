@@ -88,7 +88,7 @@ This keeps the camera and nearby bodies numerically close to the origin, improvi
 
 ### Debug/e2e query params (retained)
 
-Scene sharing/state restoration should use snapshot paths (`/s/<payload>`). Query params are intentionally limited to explicit debug/e2e startup flags:
+Scene sharing/state restoration should use canonical snapshot paths (`/<payload>`) (legacy `/s/<payload>` still loads during compatibility). Query params are intentionally limited to explicit debug/e2e startup flags:
 
 - `?logDepth=1` (or presence): opt-in to Three's logarithmic depth buffer.
   - This is **not** the primary precision strategy (it helps with depth range / z-fighting more than large-coordinate jitter), but it can be useful when experimenting with bigger far planes.

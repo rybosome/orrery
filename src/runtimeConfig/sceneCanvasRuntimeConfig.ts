@@ -47,7 +47,7 @@ const parseEnum = <T extends string>(searchParams: URLSearchParams, key: string,
  *
  * Query-param policy (Issue #21 PR4):
  * - Keep only explicit debug/e2e startup flags.
- * - Scene-state sharing should flow through `/s/<payload>` snapshots.
+ * - Scene-state sharing should flow through canonical `/<payload>` snapshots.
  *
  * Retained params:
  * - `?e2e=1` (or presence): deterministic e2e mode

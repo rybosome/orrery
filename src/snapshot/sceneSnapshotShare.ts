@@ -1,4 +1,4 @@
-import { SNAPSHOT_PATH_PREFIX } from './sceneSnapshotBoot.js'
+import { SNAPSHOT_CANONICAL_PATH_PREFIX } from './sceneSnapshotBoot.js'
 import { encodeSnapshot } from './sceneSnapshotCodec.js'
 import type { SceneSnapshotV1 } from './sceneSnapshot.js'
 
@@ -16,16 +16,16 @@ export const INITIAL_SNAPSHOT_SHARE_STATE: SnapshotShareState = {
   copyStatus: 'idle',
 }
 
-/** Build `/s/<payload>` pathname from an encoded payload. */
+/** Build canonical `/<payload>` pathname from an encoded payload. */
 export function buildSnapshotPathname(payload: string): string {
-  return `${SNAPSHOT_PATH_PREFIX}${payload}`
+  return `${SNAPSHOT_CANONICAL_PATH_PREFIX}${payload}`
 }
 
 /**
  * Build a canonical snapshot share URL from the current location href.
  *
- * Contract for PR3:
- * - path is forced to `/s/<payload>`
+ * Contract for PR6:
+ * - path is forced to canonical `/<payload>`
  * - existing query params are dropped
  * - existing hash fragment is dropped
  */

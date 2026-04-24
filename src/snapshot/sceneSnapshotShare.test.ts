@@ -11,7 +11,7 @@ import {
 } from './sceneSnapshotShare.js'
 
 describe('sceneSnapshotShare', () => {
-  it('builds canonical `/s/<payload>` share URLs and drops query/hash from current location', () => {
+  it('builds canonical `/<payload>` share URLs and drops query/hash from current location', () => {
     const base = createDefaultSceneSnapshotV1()
     const snapshot = {
       ...base,
@@ -26,7 +26,7 @@ describe('sceneSnapshotShare', () => {
     const parsed = new URL(shareUrl)
 
     expect(parsed.origin).toBe('https://orrery.test')
-    expect(parsed.pathname.startsWith('/s/')).toBe(true)
+    expect(parsed.pathname).toMatch(/^\/[A-Za-z0-9_-]+$/)
     expect(parsed.search).toBe('')
     expect(parsed.hash).toBe('')
 
@@ -41,20 +41,20 @@ describe('sceneSnapshotShare', () => {
     expect(decoded.snapshot.system.showRenderHud).toBe(true)
   })
 
-  it('builds `/s/<payload>` path segments', () => {
-    expect(buildSnapshotPathname('abc123')).toBe('/s/abc123')
+  it('builds canonical `/<payload>` path segments', () => {
+    expect(buildSnapshotPathname('abc123')).toBe('/abc123')
   })
 
   it('resets copy state to idle whenever a new URL is generated', () => {
     const next = reduceSnapshotShareState(
       {
-        generatedUrl: 'https://orrery.test/s/old',
+        generatedUrl: 'https://orrery.test/old',
         copyStatus: 'copied',
       },
-      { type: 'generated', url: 'https://orrery.test/s/new' },
+      { type: 'generated', url: 'https://orrery.test/new' },
     )
 
-    expect(next.generatedUrl).toBe('https://orrery.test/s/new')
+    expect(next.generatedUrl).toBe('https://orrery.test/new')
     expect(next.copyStatus).toBe('idle')
   })
 
@@ -64,7 +64,7 @@ describe('sceneSnapshotShare', () => {
 
     const copied = reduceSnapshotShareState(
       {
-        generatedUrl: 'https://orrery.test/s/payload',
+        generatedUrl: 'https://orrery.test/payload',
         copyStatus: 'idle',
       },
       { type: 'copy_result', copied: true },
