@@ -1010,16 +1010,22 @@ export function SceneCanvas() {
     const shareUrl = snapshotShareState.generatedUrl
     if (!shareUrl) return
 
+    const applyCopyResult = (copied: boolean) => {
+      setSnapshotShareState((current) =>
+        reduceSnapshotShareState(current, { type: 'copy_result', copied, attemptedUrl: shareUrl }),
+      )
+    }
+
     if (!navigator.clipboard?.writeText) {
-      setSnapshotShareState((current) => reduceSnapshotShareState(current, { type: 'copy_result', copied: false }))
+      applyCopyResult(false)
       return
     }
 
     try {
       await navigator.clipboard.writeText(shareUrl)
-      setSnapshotShareState((current) => reduceSnapshotShareState(current, { type: 'copy_result', copied: true }))
+      applyCopyResult(true)
     } catch {
-      setSnapshotShareState((current) => reduceSnapshotShareState(current, { type: 'copy_result', copied: false }))
+      applyCopyResult(false)
     }
   }, [snapshotShareState.generatedUrl])
 

@@ -59,7 +59,11 @@ describe('sceneSnapshotShare', () => {
   })
 
   it('updates copy status only after a URL exists', () => {
-    const unchanged = reduceSnapshotShareState(INITIAL_SNAPSHOT_SHARE_STATE, { type: 'copy_result', copied: true })
+    const unchanged = reduceSnapshotShareState(INITIAL_SNAPSHOT_SHARE_STATE, {
+      type: 'copy_result',
+      copied: true,
+      attemptedUrl: 'https://orrery.test/s/payload',
+    })
     expect(unchanged).toEqual(INITIAL_SNAPSHOT_SHARE_STATE)
 
     const copied = reduceSnapshotShareState(
@@ -67,11 +71,34 @@ describe('sceneSnapshotShare', () => {
         generatedUrl: 'https://orrery.test/s/payload',
         copyStatus: 'idle',
       },
-      { type: 'copy_result', copied: true },
+      {
+        type: 'copy_result',
+        copied: true,
+        attemptedUrl: 'https://orrery.test/s/payload',
+      },
     )
     expect(copied.copyStatus).toBe('copied')
 
-    const failed = reduceSnapshotShareState(copied, { type: 'copy_result', copied: false })
+    const failed = reduceSnapshotShareState(copied, {
+      type: 'copy_result',
+      copied: false,
+      attemptedUrl: 'https://orrery.test/s/payload',
+    })
     expect(failed.copyStatus).toBe('copy_failed')
+  })
+
+  it('ignores stale copy result events for older generated URLs', () => {
+    const current = {
+      generatedUrl: 'https://orrery.test/s/new',
+      copyStatus: 'idle' as const,
+    }
+
+    const unchanged = reduceSnapshotShareState(current, {
+      type: 'copy_result',
+      copied: true,
+      attemptedUrl: 'https://orrery.test/s/old',
+    })
+
+    expect(unchanged).toEqual(current)
   })
 })
