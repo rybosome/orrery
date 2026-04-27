@@ -30,6 +30,7 @@ import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig
 import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/initSpiceSceneRuntime.js'
 import { isEarthAppearanceLayer } from './scene/SceneModel.js'
 import { applySnapshot, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
+import { loadSnapshotFromPathnameAtBoot } from './snapshot/sceneSnapshotBoot.js'
 import { snapshotCameraToControllerState, type SceneSnapshotV1 } from './snapshot/sceneSnapshot.js'
 
 type AdvancedPaneId = 'time' | 'scale' | 'guides' | 'orbits' | 'performance' | 'rendering'
@@ -257,6 +258,8 @@ type SceneSnapshotBindings = {
   applySnapshot: (snapshot: SceneSnapshotV1) => Promise<SceneSnapshotV1>
 }
 
+const INVALID_SNAPSHOT_NOTICE = 'Invalid shared snapshot URL. Loaded default scene state instead.'
+
 /**
  * Main Three.js scene canvas + runtime initializer for the orrery app.
  */
@@ -275,6 +278,9 @@ export function SceneCanvas() {
 
   const rendererRuntimeRef = useRef<ThreeRuntime | null>(null)
   const sceneSnapshotBindingsRef = useRef<SceneSnapshotBindings | null>(null)
+  const applySceneSnapshotRef = useRef<(snapshot: SceneSnapshotV1) => Promise<SceneSnapshotV1>>(
+    async (snapshot) => snapshot,
+  )
 
   const runtimeConfig = useMemo(() => parseSceneCanvasRuntimeConfigFromLocationSearch(window.location.search), [])
 
@@ -302,6 +308,7 @@ export function SceneCanvas() {
   // Selected body (promoted from local closure variable for inspector panel)
   const [selectedBody, setSelectedBody] = useState<BodyRef | null>(null)
   const [spiceClient, setSpiceClient] = useState<SpiceAsync | null>(null)
+  const [bootSnapshotNotice, setBootSnapshotNotice] = useState<string | null>(null)
 
   // Sun postprocess tuning (ephemeral; adjustable live via the RENDERING pane).
   const [sunPostprocessExposure, setSunPostprocessExposure] = useState(sunExposure)
@@ -1102,6 +1109,8 @@ export function SceneCanvas() {
     ],
   )
 
+  applySceneSnapshotRef.current = applySceneSnapshot
+
   // PR1 foundation integration only: this binds the adapter to live app state so
   // follow-on PRs can wire URL capture/load without reworking ordering logic.
   sceneSnapshotBindingsRef.current = {
@@ -1348,6 +1357,20 @@ export function SceneCanvas() {
         // Initial render with current time store state
         const initialEtSec = timeStore.getState().etSec
         await runtime.updateScene({ etSec: initialEtSec, ...latestUiRef.current })
+
+        await loadSnapshotFromPathnameAtBoot({
+          pathname: window.location.pathname,
+          applySnapshot: (snapshot) => applySceneSnapshotRef.current(snapshot),
+          onInvalidPayload: ({ payload, errorCode, errorMessage }) => {
+            console.warn('SceneCanvas: invalid /s/<payload> snapshot at boot; falling back to defaults', {
+              pathname: window.location.pathname,
+              payload,
+              errorCode,
+              errorMessage,
+            })
+            setBootSnapshotNotice(INVALID_SNAPSHOT_NOTICE)
+          },
+        })
 
         three.resize()
         three.controller.applyToCamera(three.camera)
@@ -2216,6 +2239,20 @@ export function SceneCanvas() {
           observer="SUN"
           frame={J2000_FRAME}
         />
+      ) : null}
+
+      {bootSnapshotNotice ? (
+        <div className="sceneBootNotice" role="status" aria-live="polite">
+          <span>{bootSnapshotNotice}</span>
+          <button
+            className="sceneBootNoticeDismiss"
+            onClick={() => setBootSnapshotNotice(null)}
+            type="button"
+            aria-label="Dismiss snapshot notice"
+          >
+            ×
+          </button>
+        </div>
       ) : null}
 
       <canvas ref={canvasRef} className="sceneCanvas" />
