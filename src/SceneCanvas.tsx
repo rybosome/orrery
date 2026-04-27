@@ -31,9 +31,14 @@ import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/i
 import { isEarthAppearanceLayer } from './scene/SceneModel.js'
 import { applySnapshot, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
 import { loadSnapshotFromPathnameAtBoot } from './snapshot/sceneSnapshotBoot.js'
+import {
+  buildSnapshotShareUrlForLocation,
+  INITIAL_SNAPSHOT_SHARE_STATE,
+  reduceSnapshotShareState,
+} from './snapshot/sceneSnapshotShare.js'
 import { snapshotCameraToControllerState, type SceneSnapshotV1 } from './snapshot/sceneSnapshot.js'
 
-type AdvancedPaneId = 'time' | 'scale' | 'guides' | 'orbits' | 'performance' | 'rendering'
+type AdvancedPaneId = 'time' | 'scale' | 'guides' | 'orbits' | 'system' | 'rendering'
 
 type AdvancedHelpTopicId =
   | 'zoom'
@@ -78,10 +83,10 @@ const ADVANCED_PANES: Array<{ id: AdvancedPaneId; tabLabel: string; title: strin
     summary: 'Orbit line fidelity vs speed. These settings can strongly affect CPU/GPU and memory.',
   },
   {
-    id: 'performance',
-    tabLabel: 'PERFORMANCE',
-    title: 'PERFORMANCE',
-    summary: 'Optional effects and overlays that may impact FPS or battery.',
+    id: 'system',
+    tabLabel: 'SYSTEM',
+    title: 'SYSTEM',
+    summary: 'Performance toggles and snapshot state sharing.',
   },
   {
     id: 'rendering',
@@ -321,6 +326,7 @@ export function SceneCanvas() {
   // Advanced tuning sliders (ephemeral, local state only)
   const [advancedPane, setAdvancedPane] = useState<AdvancedPaneId>('time')
   const [advancedHelpTopic, setAdvancedHelpTopic] = useState<AdvancedHelpTopicId | null>(null)
+  const [snapshotShareState, setSnapshotShareState] = useState(() => ({ ...INITIAL_SNAPSHOT_SHARE_STATE }))
 
   const controlsTabsId = useId()
 
@@ -988,6 +994,40 @@ export function SceneCanvas() {
     sunPostprocessBloomRadius,
     sunPostprocessBloomResolutionScale,
   ])
+
+  const handleCreateSnapshotUrl = useCallback(() => {
+    const bindings = sceneSnapshotBindingsRef.current
+    if (!bindings) return
+
+    const snapshot = bindings.captureSnapshot()
+    if (!snapshot) return
+
+    const shareUrl = buildSnapshotShareUrlForLocation(snapshot, window.location.href)
+    setSnapshotShareState((current) => reduceSnapshotShareState(current, { type: 'generated', url: shareUrl }))
+  }, [])
+
+  const handleCopySnapshotUrl = useCallback(async () => {
+    const shareUrl = snapshotShareState.generatedUrl
+    if (!shareUrl) return
+
+    const applyCopyResult = (copied: boolean) => {
+      setSnapshotShareState((current) =>
+        reduceSnapshotShareState(current, { type: 'copy_result', copied, attemptedUrl: shareUrl }),
+      )
+    }
+
+    if (!navigator.clipboard?.writeText) {
+      applyCopyResult(false)
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      applyCopyResult(true)
+    } catch {
+      applyCopyResult(false)
+    }
+  }, [snapshotShareState.generatedUrl])
 
   const applySceneSnapshot = useCallback(
     async (snapshot: SceneSnapshotV1): Promise<SceneSnapshotV1> => {
@@ -1996,56 +2036,122 @@ export function SceneCanvas() {
                   </div>
                 ) : null}
 
-                {/* Pane: PERFORMANCE */}
-                {advancedPane === 'performance' ? (
+                {/* Pane: SYSTEM */}
+                {advancedPane === 'system' ? (
                   <div
                     className="advancedGroup"
                     role="tabpanel"
-                    id={`${controlsTabsId}-panel-performance`}
-                    aria-labelledby={`${controlsTabsId}-tab-performance`}
+                    id={`${controlsTabsId}-panel-system`}
+                    aria-labelledby={`${controlsTabsId}-tab-system`}
                   >
-                    <div className="advancedCheckboxWithHelp">
-                      <label className="asciiCheckbox">
-                        <input
-                          className="asciiCheckboxInput"
-                          type="checkbox"
-                          checked={animatedSky}
-                          onChange={(e) => setAnimatedSky(e.target.checked)}
-                        />
-                        <span className="asciiCheckboxBox" aria-hidden="true" />
-                        <span className="asciiCheckboxLabel">Milky Way</span>
-                      </label>
-                      <AdvancedHelpButton topic="animatedSky" onOpen={setAdvancedHelpTopic} />
-                    </div>
+                    <div className="advancedSubsection">
+                      <div className="advancedSubsectionHeader">
+                        <div className="advancedSubsectionTitle">Performance</div>
+                        <div className="advancedSubsectionSummary">
+                          Optional effects and overlays that may impact FPS or battery.
+                        </div>
+                      </div>
 
-                    <div className="advancedCheckboxWithHelp">
-                      <label className="asciiCheckbox">
-                        <input
-                          className="asciiCheckboxInput"
-                          type="checkbox"
-                          checked={skyTwinkle}
-                          onChange={(e) => setSkyTwinkle(e.target.checked)}
-                        />
-                        <span className="asciiCheckboxBox" aria-hidden="true" />
-                        <span className="asciiCheckboxLabel">Sky Twinkle</span>
-                      </label>
-                      <AdvancedHelpButton topic="skyTwinkle" onOpen={setAdvancedHelpTopic} />
+                      <div className="advancedCheckboxWithHelp">
+                        <label className="asciiCheckbox">
+                          <input
+                            className="asciiCheckboxInput"
+                            type="checkbox"
+                            checked={animatedSky}
+                            onChange={(e) => setAnimatedSky(e.target.checked)}
+                          />
+                          <span className="asciiCheckboxBox" aria-hidden="true" />
+                          <span className="asciiCheckboxLabel">Milky Way</span>
+                        </label>
+                        <AdvancedHelpButton topic="animatedSky" onOpen={setAdvancedHelpTopic} />
+                      </div>
+
+                      <div className="advancedCheckboxWithHelp">
+                        <label className="asciiCheckbox">
+                          <input
+                            className="asciiCheckboxInput"
+                            type="checkbox"
+                            checked={skyTwinkle}
+                            onChange={(e) => setSkyTwinkle(e.target.checked)}
+                          />
+                          <span className="asciiCheckboxBox" aria-hidden="true" />
+                          <span className="asciiCheckboxLabel">Sky Twinkle</span>
+                        </label>
+                        <AdvancedHelpButton topic="skyTwinkle" onOpen={setAdvancedHelpTopic} />
+                      </div>
+
+                      <div className="advancedDivider" />
+
+                      <div className="advancedCheckboxWithHelp">
+                        <label className="asciiCheckbox">
+                          <input
+                            className="asciiCheckboxInput"
+                            type="checkbox"
+                            checked={showRenderHud}
+                            onChange={(e) => setShowRenderHud(e.target.checked)}
+                          />
+                          <span className="asciiCheckboxBox" aria-hidden="true" />
+                          <span className="asciiCheckboxLabel">Render HUD</span>
+                        </label>
+                        <AdvancedHelpButton topic="renderHud" onOpen={setAdvancedHelpTopic} />
+                      </div>
                     </div>
 
                     <div className="advancedDivider" />
 
-                    <div className="advancedCheckboxWithHelp">
-                      <label className="asciiCheckbox">
-                        <input
-                          className="asciiCheckboxInput"
-                          type="checkbox"
-                          checked={showRenderHud}
-                          onChange={(e) => setShowRenderHud(e.target.checked)}
-                        />
-                        <span className="asciiCheckboxBox" aria-hidden="true" />
-                        <span className="asciiCheckboxLabel">Render HUD</span>
-                      </label>
-                      <AdvancedHelpButton topic="renderHud" onOpen={setAdvancedHelpTopic} />
+                    <div className="advancedSubsection">
+                      <div className="advancedSubsectionHeader">
+                        <div className="advancedSubsectionTitle">State</div>
+                        <div className="advancedSubsectionSummary">
+                          Generate a shareable `/s/&lt;payload&gt;` snapshot URL from the current scene state.
+                        </div>
+                      </div>
+
+                      <div className="controlsSection">
+                        <button
+                          className="asciiBtn asciiBtnWide"
+                          type="button"
+                          onClick={handleCreateSnapshotUrl}
+                          title="Capture the current scene state and generate a shareable URL"
+                        >
+                          <span className="asciiBtnBracket">[</span>
+                          <span className="asciiBtnContent">Create snapshot URL</span>
+                          <span className="asciiBtnBracket">]</span>
+                        </button>
+                      </div>
+
+                      <div className="advancedSnapshotUrlBlock">
+                        <span className="advancedSnapshotUrlLabel">Generated URL</span>
+                        <code className="advancedSnapshotUrlValue">
+                          {snapshotShareState.generatedUrl ?? 'No snapshot URL generated yet.'}
+                        </code>
+                      </div>
+
+                      <div className="advancedSnapshotCopyRow">
+                        <button
+                          className="advancedTab"
+                          type="button"
+                          onClick={() => {
+                            void handleCopySnapshotUrl()
+                          }}
+                          disabled={!snapshotShareState.generatedUrl}
+                        >
+                          {snapshotShareState.copyStatus === 'copied' ? 'Copied' : 'Copy'}
+                        </button>
+                        <span
+                          className={`advancedSnapshotCopyStatus ${snapshotShareState.copyStatus === 'copy_failed' ? 'advancedSnapshotCopyStatusError' : ''}`}
+                          role="status"
+                          aria-live="polite"
+                        >
+                          {!snapshotShareState.generatedUrl
+                            ? 'Generate a snapshot URL to enable copy.'
+                            : snapshotShareState.copyStatus === 'copied'
+                              ? 'Copied to clipboard.'
+                              : snapshotShareState.copyStatus === 'copy_failed'
+                                ? 'Copy failed. Copy manually.'
+                                : 'Ready to copy.'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ) : null}
