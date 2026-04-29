@@ -28,7 +28,8 @@ Snapshots are stored alongside each spec in `*-snapshots/` directories.
 
 ## Notes for appearance iteration (Phase 0)
 
-- Sun appearance screenshots use `/?e2e=1` and a small e2e-only API exposed on
+- Sun appearance screenshots use `/?e2e=1` (optionally with `&et=<number>`,
+  `&sunPostprocessMode=...`, `&sunToneMap=...`) and a small e2e-only API exposed on
   `window.__tspice_viewer__e2e`:
   - `setCameraPreset('sun-close' | 'sun-medium' | 'sun-far')`
   - `lockDeterministicLighting()`
