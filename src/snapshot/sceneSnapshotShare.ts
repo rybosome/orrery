@@ -9,7 +9,9 @@ export type SnapshotShareState = {
   copyStatus: SnapshotShareCopyStatus
 }
 
-export type SnapshotShareStateEvent = { type: 'generated'; url: string } | { type: 'copy_result'; copied: boolean }
+export type SnapshotShareStateEvent =
+  | { type: 'generated'; url: string }
+  | { type: 'copy_result'; copied: boolean; attemptedUrl: string }
 
 export const INITIAL_SNAPSHOT_SHARE_STATE: SnapshotShareState = {
   generatedUrl: null,
@@ -52,6 +54,7 @@ export function reduceSnapshotShareState(state: SnapshotShareState, event: Snaps
   }
 
   if (!state.generatedUrl) return state
+  if (event.attemptedUrl !== state.generatedUrl) return state
 
   return {
     ...state,
