@@ -516,6 +516,29 @@ export function listDefaultVisibleSceneBodies(): readonly SceneBody[] {
   }))
 }
 
+/**
+ * Resolve registry entries for a scene-body list in deterministic order.
+ *
+ * - Preserves input order.
+ * - Deduplicates by stable `BodyId`.
+ * - Skips unknown/unregistered scene bodies.
+ */
+export function listBodyRegistryEntriesForSceneBodies(sceneBodies: readonly SceneBody[]): readonly BodyRegistryEntry[] {
+  const entries: BodyRegistryEntry[] = []
+  const seenBodyIds = new Set<BodyId>()
+
+  for (const sceneBody of sceneBodies) {
+    const resolved = resolveBodyRegistryEntry(String(sceneBody.body)) ?? getBodyRegistryEntryByBodyRef(sceneBody.body)
+    if (!resolved) continue
+    if (seenBodyIds.has(resolved.id)) continue
+
+    seenBodyIds.add(resolved.id)
+    entries.push(resolved)
+  }
+
+  return entries
+}
+
 export const __testing = {
   canonicalizeResolveKey,
 }

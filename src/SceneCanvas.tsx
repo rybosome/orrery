@@ -1435,6 +1435,7 @@ export function SceneCanvas() {
         await loadSnapshotFromPathnameAtBoot({
           pathname: bootPathname,
           applySnapshot: (snapshot) => applySceneSnapshotRef.current(snapshot),
+          trace: loadingTrace,
           onInvalidPayload: ({ payload, errorCode, errorMessage }) => {
             console.warn('SceneCanvas: invalid /s/<payload> snapshot at boot; falling back to defaults', {
               pathname: bootPathname,

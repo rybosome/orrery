@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { __testing, resolveBodyRegistryEntry } from './BodyRegistry.js'
+import {
+  __testing,
+  getBodyRegistryEntry,
+  listBodyRegistryEntriesForSceneBodies,
+  resolveBodyRegistryEntry,
+} from './BodyRegistry.js'
 
 describe('canonicalizeResolveKey', () => {
   it('trims whitespace', () => {
@@ -35,5 +40,30 @@ describe('resolveBodyRegistryEntry', () => {
 
   it('rejects exponent-style strings (treated as non-numeric)', () => {
     expect(resolveBodyRegistryEntry('3e2')).toBeUndefined()
+  })
+})
+
+describe('listBodyRegistryEntriesForSceneBodies', () => {
+  it('preserves order, resolves aliases, and deduplicates by BodyId', () => {
+    const earth = getBodyRegistryEntry('EARTH')
+    const saturn = getBodyRegistryEntry('SATURN')
+
+    const resolved = listBodyRegistryEntriesForSceneBodies([
+      { body: earth.body, bodyFixedFrame: earth.bodyFixedFrame, style: earth.style },
+      {
+        // Resolve via NAIF numeric id alias.
+        body: earth.naifIds?.body ?? earth.body,
+        bodyFixedFrame: earth.bodyFixedFrame,
+        style: earth.style,
+      },
+      {
+        // Unknown body refs are ignored.
+        body: 'NOT_IN_REGISTRY',
+        style: earth.style,
+      },
+      { body: saturn.body, bodyFixedFrame: saturn.bodyFixedFrame, style: saturn.style },
+    ])
+
+    expect(resolved.map((entry) => entry.id)).toEqual(['EARTH', 'SATURN'])
   })
 })

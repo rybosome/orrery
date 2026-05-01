@@ -51,6 +51,23 @@ export type SceneSnapshotApplyInput = {
   applyCamera: (next: SceneSnapshotCameraV1) => void
 }
 
+/** Monotonic-now helper used by snapshot timing telemetry. */
+export function monotonicNowMs(): number {
+  return globalThis.performance?.now?.() ?? Date.now()
+}
+
+/** Measure the elapsed duration of a snapshot-apply operation. */
+export async function measureSnapshotApplyDuration<T>(
+  apply: () => Promise<T> | T,
+): Promise<{ result: T; durationMs: number }> {
+  const startedAtMs = monotonicNowMs()
+  const result = await apply()
+  return {
+    result,
+    durationMs: monotonicNowMs() - startedAtMs,
+  }
+}
+
 /** Capture a canonical snapshot from live controller/time/UI state. */
 export function captureSnapshot(input: SceneSnapshotCaptureInput): SceneSnapshotV1 {
   const direction = playbackDirectionForRate(input.time.rateSecPerSec)

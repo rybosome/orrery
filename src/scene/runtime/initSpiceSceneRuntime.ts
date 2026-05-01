@@ -3,6 +3,11 @@ import type { SpiceAsync, StateVector } from '@rybosome/tspice'
 
 import { computeOrbitAnglesToKeepPointInView, isDirectionWithinFov } from '../../controls/sunFocus.js'
 import type { BootLoadingTrace } from '../../loading/bootLoadingTelemetry.js'
+import {
+  buildStartupAssetManifestFromBodyRegistryEntries,
+  computeStartupAssetCompletionAccounting,
+  listStartupAssetIds,
+} from '../../loading/startupAssetManifest.js'
 import { createSpiceClient } from '../../spice/createSpiceClient.js'
 import { J2000_FRAME, type BodyRef, type EtSeconds, type Mat3, type Vec3Km } from '../../spice/types.js'
 import { createBodyMesh } from '../BodyMesh.js'
@@ -10,6 +15,7 @@ import { SUN_BLOOM_LAYER } from '../../renderLayers.js'
 import {
   getBodyRegistryEntry,
   getBodyRegistryEntryByBodyRef,
+  listBodyRegistryEntriesForSceneBodies,
   resolveBodyRegistryEntry,
   listDefaultVisibleSceneBodies,
   type BodyId,
@@ -212,8 +218,19 @@ export async function initSpiceSceneRuntime(args: {
     ],
   }
 
+  const startupAssetManifest = buildStartupAssetManifestFromBodyRegistryEntries(
+    listBodyRegistryEntriesForSceneBodies(sceneModel.bodies),
+  )
+  const startupAssetInitAccounting = computeStartupAssetCompletionAccounting(startupAssetManifest)
+
   trace?.emit('sceneBodyAssetsInitStarted', {
     bodyCount: sceneModel.bodies.length,
+    startupAssetTotal: startupAssetInitAccounting.total,
+    startupAssetRequired: startupAssetInitAccounting.required,
+    startupAssetCompleted: startupAssetInitAccounting.completed,
+    startupAssetFailed: startupAssetInitAccounting.failed,
+    startupAssetPending: startupAssetInitAccounting.pending,
+    startupAssetReadinessRatio: startupAssetInitAccounting.readinessRatio,
   })
 
   const bodies = sceneModel.bodies.map((body) => {
@@ -274,8 +291,18 @@ export async function initSpiceSceneRuntime(args: {
   // Ensure textures are loaded before we mark the scene as rendered.
   await Promise.all(bodies.map((b) => b.ready))
 
+  const startupAssetCompletionAccounting = computeStartupAssetCompletionAccounting(startupAssetManifest, {
+    completedAssetIds: listStartupAssetIds(startupAssetManifest),
+  })
+
   trace?.emit('sceneBodyAssetsInitCompleted', {
     bodyCount: bodies.length,
+    startupAssetTotal: startupAssetCompletionAccounting.total,
+    startupAssetRequired: startupAssetCompletionAccounting.required,
+    startupAssetCompleted: startupAssetCompletionAccounting.completed,
+    startupAssetFailed: startupAssetCompletionAccounting.failed,
+    startupAssetPending: startupAssetCompletionAccounting.pending,
+    startupAssetReadinessRatio: startupAssetCompletionAccounting.readinessRatio,
   })
 
   if (isDisposed()) {
