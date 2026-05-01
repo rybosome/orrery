@@ -5,7 +5,7 @@ import { encodeSnapshot } from './sceneSnapshotCodec.js'
 import { loadSnapshotFromPathnameAtBoot, parseSnapshotPayloadFromPathname } from './sceneSnapshotBoot.js'
 
 describe('sceneSnapshotBoot', () => {
-  it('applies a valid `/s/<payload>` snapshot at boot', async () => {
+  it('applies a valid canonical `/<payload>` snapshot at boot', async () => {
     const snapshot = createDefaultSceneSnapshotV1()
     const snapshotToEncode: SceneSnapshotV1 = {
       ...snapshot,
@@ -27,7 +27,7 @@ describe('sceneSnapshotBoot', () => {
     const applySnapshot = vi.fn(async (next: SceneSnapshotV1) => next)
 
     const result = await loadSnapshotFromPathnameAtBoot({
-      pathname: `/s/${payload}`,
+      pathname: `/${payload}`,
       applySnapshot,
     })
 
@@ -38,6 +38,33 @@ describe('sceneSnapshotBoot', () => {
     expect(appliedArg?.focusBody).toBe('MARS')
     expect(appliedArg?.player.etSec).toBe(123_456)
     expect(appliedArg?.guides.labelsEnabled).toBe(true)
+  })
+
+  it('still applies valid legacy `/s/<payload>` snapshots during compatibility window', async () => {
+    const snapshot = createDefaultSceneSnapshotV1()
+    const snapshotToEncode: SceneSnapshotV1 = {
+      ...snapshot,
+      focusBody: 'VENUS',
+      system: {
+        ...snapshot.system,
+        showRenderHud: true,
+      },
+    }
+
+    const payload = encodeSnapshot(snapshotToEncode)
+    const applySnapshot = vi.fn(async (next: SceneSnapshotV1) => next)
+
+    const result = await loadSnapshotFromPathnameAtBoot({
+      pathname: `/s/${payload}`,
+      applySnapshot,
+    })
+
+    expect(result.status).toBe('applied')
+    expect(applySnapshot).toHaveBeenCalledTimes(1)
+
+    const appliedArg = applySnapshot.mock.calls[0]?.[0]
+    expect(appliedArg?.focusBody).toBe('VENUS')
+    expect(appliedArg?.system.showRenderHud).toBe(true)
   })
 
   it('falls back to defaults + raises invalid-payload notice callback for bad `/s/<payload>` links', async () => {
@@ -59,9 +86,13 @@ describe('sceneSnapshotBoot', () => {
     expect(invalidCall?.errorMessage).toMatch(/invalid base64url/i)
   })
 
-  it('only parses the `/s/<payload>` path shape (not bare-root payloads)', () => {
+  it('parses canonical and legacy snapshot path shapes only', () => {
+    expect(parseSnapshotPayloadFromPathname('/abc123')).toBe('abc123')
     expect(parseSnapshotPayloadFromPathname('/s/abc123')).toBe('abc123')
-    expect(parseSnapshotPayloadFromPathname('/abc123')).toBeNull()
+
+    expect(parseSnapshotPayloadFromPathname('/')).toBeNull()
     expect(parseSnapshotPayloadFromPathname('/s/abc/def')).toBeNull()
+    expect(parseSnapshotPayloadFromPathname('/abc/def')).toBeNull()
+    expect(parseSnapshotPayloadFromPathname('/static/textures/planets/earth.png')).toBeNull()
   })
 })

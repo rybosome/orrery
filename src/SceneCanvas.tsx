@@ -1396,7 +1396,7 @@ export function SceneCanvas() {
           pathname: window.location.pathname,
           applySnapshot: (snapshot) => applySceneSnapshotRef.current(snapshot),
           onInvalidPayload: ({ payload, errorCode, errorMessage }) => {
-            console.warn('SceneCanvas: invalid /s/<payload> snapshot at boot; falling back to defaults', {
+            console.warn('SceneCanvas: invalid snapshot path payload at boot; falling back to defaults', {
               pathname: window.location.pathname,
               payload,
               errorCode,
@@ -2097,7 +2097,7 @@ export function SceneCanvas() {
                       <div className="advancedSubsectionHeader">
                         <div className="advancedSubsectionTitle">State</div>
                         <div className="advancedSubsectionSummary">
-                          Generate a shareable `/s/&lt;payload&gt;` snapshot URL from the current scene state.
+                          Generate a shareable `/&lt;payload&gt;` snapshot URL from the current scene state.
                         </div>
                       </div>
 

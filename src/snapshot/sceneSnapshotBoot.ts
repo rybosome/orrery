@@ -1,7 +1,8 @@
 import { decodeSnapshot, type SceneSnapshotDecodeResult } from './sceneSnapshotCodec.js'
 import type { SceneSnapshotV1 } from './sceneSnapshot.js'
 
-export const SNAPSHOT_PATH_PREFIX = '/s/'
+export const SNAPSHOT_CANONICAL_PATH_PREFIX = '/'
+export const SNAPSHOT_LEGACY_PATH_PREFIX = '/s/'
 
 type SnapshotDecodeErrorCode = Extract<SceneSnapshotDecodeResult, { ok: false }>['error']['code']
 
@@ -41,23 +42,43 @@ export type SceneSnapshotBootLoadInput = {
 }
 
 /**
- * Parse a snapshot payload from a pathname that matches `/s/<payload>`.
+ * Parse a snapshot payload from a pathname.
  *
- * Scope is intentionally narrow for PR2:
- * - exact leading `/s/`
- * - exactly one payload segment (no nested paths)
+ * Supported path shapes during the compatibility window:
+ * - `/<payload>` (canonical)
+ * - `/s/<payload>` (legacy)
+ *
+ * Both variants require exactly one payload segment (no nested paths).
  */
 export function parseSnapshotPayloadFromPathname(pathname: string): string | null {
-  if (!pathname.startsWith(SNAPSHOT_PATH_PREFIX)) return null
+  const legacyPayload = parseLegacySnapshotPayloadFromPathname(pathname)
+  if (legacyPayload) return legacyPayload
 
-  const payload = pathname.slice(SNAPSHOT_PATH_PREFIX.length)
+  return parseCanonicalSnapshotPayloadFromPathname(pathname)
+}
+
+function parseCanonicalSnapshotPayloadFromPathname(pathname: string): string | null {
+  if (!pathname.startsWith(SNAPSHOT_CANONICAL_PATH_PREFIX)) return null
+
+  const payload = pathname.slice(SNAPSHOT_CANONICAL_PATH_PREFIX.length)
+  return parseSnapshotPayloadSegment(payload)
+}
+
+function parseLegacySnapshotPayloadFromPathname(pathname: string): string | null {
+  if (!pathname.startsWith(SNAPSHOT_LEGACY_PATH_PREFIX)) return null
+
+  const payload = pathname.slice(SNAPSHOT_LEGACY_PATH_PREFIX.length)
+  return parseSnapshotPayloadSegment(payload)
+}
+
+function parseSnapshotPayloadSegment(payload: string): string | null {
   if (!payload) return null
   if (payload.includes('/')) return null
 
   return payload
 }
 
-/** Resolve `/s/<payload>` pathname into either a valid snapshot, invalid payload error, or no-op. */
+/** Resolve snapshot pathname (`/<payload>` or `/s/<payload>`) into valid/invalid/no-op. */
 export function resolveSnapshotFromPathname(
   pathname: string,
   decodeSnapshotPayload: (payload: string) => SceneSnapshotDecodeResult = decodeSnapshot,
@@ -83,7 +104,7 @@ export function resolveSnapshotFromPathname(
 }
 
 /**
- * Boot-time snapshot loader for `/s/<payload>` links.
+ * Boot-time snapshot loader for snapshot links (`/<payload>` + legacy `/s/<payload>`).
  *
  * On invalid payloads, this intentionally does not call `applySnapshot`.
  * Callers keep their existing/default boot state and can show a non-blocking notice.
