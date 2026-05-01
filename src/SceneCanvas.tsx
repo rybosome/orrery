@@ -19,7 +19,13 @@ import { SelectionInspector } from './ui/SelectionInspector.js'
 import { captureTspiceViewerBootDiagnostics, markTspiceViewerRenderedScene } from './e2eHooks/index.js'
 import { installSceneInteractions, type SceneInteractions } from './interaction/installSceneInteractions.js'
 import { createBootLoadingTrace, toLoadingTraceErrorMetadata } from './loading/bootLoadingTelemetry.js'
-import { computeConvergencePrimitives } from './loading/convergence/index.js'
+import {
+  computeConvergencePrimitives,
+  recommendLoadingVisualPreset,
+  resolveLoadingVisualPresetBudgets,
+  resolveLoadingVisualPresetConfig,
+  type LoadingVisualPresetDiagnostics,
+} from './loading/convergence/index.js'
 import { detectDeviceTier } from './loading/deviceTier.js'
 import { createBootLoadingStoreSink, loadingStore, useLoadingStoreSelector } from './loading/loadingStore.js'
 import {
@@ -314,17 +320,40 @@ export function SceneCanvas() {
   const loadingReadinessValue = useLoadingStoreSelector((state) => state.readiness.value)
   const loadingHasFailure = useLoadingStoreSelector((state) => state.failure != null)
 
+  const deviceTierProfile = useMemo(() => detectDeviceTier({ isE2e }), [isE2e])
+
+  const loadingVisualPresetRecommendation = useMemo(
+    () =>
+      recommendLoadingVisualPreset({
+        device: deviceTierProfile,
+        telemetry: {
+          phase: loadingPhase,
+          readinessValue: loadingReadinessValue,
+          hasFailure: loadingHasFailure,
+        },
+      }),
+    [deviceTierProfile, loadingPhase, loadingReadinessValue, loadingHasFailure],
+  )
+
+  const loadingVisualPresetConfig = useMemo(
+    () => resolveLoadingVisualPresetConfig(loadingVisualPresetRecommendation.diagnostics.selectedPreset),
+    [loadingVisualPresetRecommendation.diagnostics.selectedPreset],
+  )
+
+  const loadingVisualBudget = useMemo(
+    () => resolveLoadingVisualPresetBudgets(deviceTierProfile.budgets, loadingVisualPresetConfig),
+    [deviceTierProfile.budgets, loadingVisualPresetConfig],
+  )
+
   const loadingConvergencePrimitives = useMemo(
     () =>
       computeConvergencePrimitives({
         phase: loadingPhase,
         readinessValue: loadingReadinessValue,
         hasFailure: loadingHasFailure,
-      }),
-    [loadingPhase, loadingReadinessValue, loadingHasFailure],
+      }, loadingVisualPresetConfig.convergenceTuning),
+    [loadingPhase, loadingReadinessValue, loadingHasFailure, loadingVisualPresetConfig],
   )
-
-  const deviceTierProfile = useMemo(() => detectDeviceTier({ isE2e }), [isE2e])
 
   const [focusBody, setFocusBody] = useState<BodyRef>('EARTH')
   const [showJ2000Axes, setShowJ2000Axes] = useState(false)
@@ -477,7 +506,9 @@ export function SceneCanvas() {
     sunBloomStrength,
     sunBloomRadius,
     sunBloomResolutionScale,
+    deviceTierProfile,
     rendererMaxPixelRatio: deviceTierProfile.budgets.maxRendererPixelRatio,
+    initialLoadingVisualPresetDiagnostics: loadingVisualPresetRecommendation.diagnostics,
     kmToWorld,
     animatedSky,
     twinkleEnabled,
@@ -1257,8 +1288,18 @@ export function SceneCanvas() {
     const container = containerRef.current
     if (!canvas || !container) return
 
-    const { isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld, rendererMaxPixelRatio } =
-      initRuntimeConfigRef.current
+    const {
+      isE2e,
+      enableLogDepth,
+      starSeed,
+      animatedSky,
+      twinkleEnabled,
+      initialEt,
+      kmToWorld,
+      rendererMaxPixelRatio,
+      deviceTierProfile: bootDeviceTierProfile,
+      initialLoadingVisualPresetDiagnostics,
+    } = initRuntimeConfigRef.current
 
     loadingStore.reset()
     const loadingTrace = createBootLoadingTrace({
@@ -1269,6 +1310,7 @@ export function SceneCanvas() {
       enableLogDepth,
       animatedSky,
       twinkleEnabled,
+      loadingVisual: toLoadingVisualDiagnosticsPayload(initialLoadingVisualPresetDiagnostics),
     })
 
     let disposed = false
@@ -1632,10 +1674,21 @@ export function SceneCanvas() {
 
         loadingTrace.emit('bootCompleted', { isE2e })
 
+        const completedLoadingState = loadingStore.getSnapshot()
+        const completedLoadingVisualRecommendation = recommendLoadingVisualPreset({
+          device: bootDeviceTierProfile,
+          telemetry: {
+            phase: completedLoadingState.phase,
+            readinessValue: completedLoadingState.readiness.value,
+            hasFailure: completedLoadingState.failure != null,
+          },
+        })
+
         captureTspiceViewerBootDiagnostics({
           isE2e,
           status: 'completed',
-          loadingState: loadingStore.getSnapshot(),
+          loadingState: completedLoadingState,
+          loadingVisual: toLoadingVisualDiagnosticsPayload(completedLoadingVisualRecommendation.diagnostics),
         })
       } catch (err) {
         loadingTrace.emit('bootFailed', {
@@ -1643,10 +1696,21 @@ export function SceneCanvas() {
           ...toLoadingTraceErrorMetadata(err),
         })
 
+        const failedLoadingState = loadingStore.getSnapshot()
+        const failedLoadingVisualRecommendation = recommendLoadingVisualPreset({
+          device: bootDeviceTierProfile,
+          telemetry: {
+            phase: failedLoadingState.phase,
+            readinessValue: failedLoadingState.readiness.value,
+            hasFailure: failedLoadingState.failure != null,
+          },
+        })
+
         captureTspiceViewerBootDiagnostics({
           isE2e,
           status: 'failed',
-          loadingState: loadingStore.getSnapshot(),
+          loadingState: failedLoadingState,
+          loadingVisual: toLoadingVisualDiagnosticsPayload(failedLoadingVisualRecommendation.diagnostics),
         })
 
         // Surface initialization failures to the console so e2e tests can catch them.
@@ -2460,7 +2524,9 @@ export function SceneCanvas() {
         <LoadingOverlay
           primitives={loadingConvergencePrimitives}
           deviceTier={deviceTierProfile.tier}
-          budget={deviceTierProfile.budgets}
+          budget={loadingVisualBudget}
+          preset={loadingVisualPresetConfig.key}
+          presetAffordance={loadingVisualPresetConfig.overlayAffordance}
         />
       ) : null}
 
@@ -2484,4 +2550,21 @@ export function SceneCanvas() {
       <HelpOverlay isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   )
+}
+
+function toLoadingVisualDiagnosticsPayload(
+  diagnostics: LoadingVisualPresetDiagnostics,
+): LoadingVisualPresetDiagnostics {
+  return {
+    selectedPreset: diagnostics.selectedPreset,
+    recommendedPreset: diagnostics.recommendedPreset,
+    defaultPreset: diagnostics.defaultPreset,
+    recommendationSource: diagnostics.recommendationSource,
+    rankedPresets: [...diagnostics.rankedPresets],
+    scores: {
+      instrument: diagnostics.scores.instrument,
+      cosmic: diagnostics.scores.cosmic,
+      hybrid: diagnostics.scores.hybrid,
+    },
+  }
 }

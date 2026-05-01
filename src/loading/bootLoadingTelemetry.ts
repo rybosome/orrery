@@ -4,6 +4,7 @@ import {
   type CreateLoadingTraceOptions,
   type LoadingTrace,
 } from './loadingTrace.js'
+import type { LoadingVisualPresetDiagnostics } from './convergence/loadingVisualPresets.js'
 
 export type BootTextureAssetKind =
   | 'surfaceMap'
@@ -41,6 +42,7 @@ export type BootLoadingEventMap = {
     enableLogDepth: boolean
     animatedSky: boolean
     twinkleEnabled: boolean
+    loadingVisual?: LoadingVisualPresetDiagnostics
   }
   rendererRuntimeInitStarted: undefined
   rendererRuntimeInitCompleted: {

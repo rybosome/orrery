@@ -105,15 +105,29 @@
   --loading-scanline-opacity: 0.2;
   --loading-scanline-count: 16;
   --loading-pulse: 0.5;
+  --loading-backdrop-strength: 1;
+  --loading-reticle-scale: 1;
+  --loading-backdrop-primary-rgb: 111, 255, 164;
+  --loading-backdrop-secondary-rgb: 64, 223, 135;
+  --loading-scanline-rgb: 113, 255, 165;
+  --loading-ring-rgb: 130, 255, 180;
+  --loading-sweep-rgb: 144, 255, 192;
+  --loading-reticle-rgb: 154, 255, 199;
+  --loading-particle-rgb: 160, 255, 205;
 }
 
 .loadingVisualBackdrop {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 50% 50%, rgba(111, 255, 164, 0.16) 0%, rgba(111, 255, 164, 0.07) 24%, rgba(8, 16, 13, 0) 68%),
-    radial-gradient(circle at 50% 50%, rgba(64, 223, 135, 0.1) 0%, rgba(13, 22, 18, 0) 72%);
-  opacity: calc(0.5 + var(--loading-effect-intensity) * 0.45);
+    radial-gradient(
+      circle at 50% 50%,
+      rgba(var(--loading-backdrop-primary-rgb), 0.16) 0%,
+      rgba(var(--loading-backdrop-primary-rgb), 0.07) 24%,
+      rgba(8, 16, 13, 0) 68%
+    ),
+    radial-gradient(circle at 50% 50%, rgba(var(--loading-backdrop-secondary-rgb), 0.1) 0%, rgba(13, 22, 18, 0) 72%);
+  opacity: calc((0.5 + var(--loading-effect-intensity) * 0.45) * var(--loading-backdrop-strength));
 }
 
 .loadingVisualScanlines {
@@ -121,7 +135,11 @@
   inset: 0;
   opacity: var(--loading-scanline-opacity);
   background-size: 100% calc(100% / var(--loading-scanline-count));
-  background-image: linear-gradient(to bottom, rgba(113, 255, 165, 0.2) 0%, rgba(113, 255, 165, 0) 58%);
+  background-image: linear-gradient(
+    to bottom,
+    rgba(var(--loading-scanline-rgb), 0.2) 0%,
+    rgba(var(--loading-scanline-rgb), 0) 58%
+  );
   mix-blend-mode: screen;
 }
 
@@ -139,10 +157,10 @@
   left: 50%;
   top: 50%;
   border-radius: 999px;
-  border: var(--stroke-1) solid rgba(130, 255, 180, 0.42);
+  border: var(--stroke-1) solid rgba(var(--loading-ring-rgb), 0.42);
   box-shadow:
-    0 0 24px rgba(111, 255, 164, 0.2),
-    inset 0 0 14px rgba(111, 255, 164, 0.16);
+    0 0 24px rgba(var(--loading-backdrop-primary-rgb), 0.2),
+    inset 0 0 14px rgba(var(--loading-backdrop-primary-rgb), 0.16);
   will-change: transform, opacity;
 }
 
@@ -153,8 +171,8 @@
   width: 58%;
   height: 1px;
   transform-origin: 0 50%;
-  background: linear-gradient(90deg, rgba(144, 255, 192, 0.9) 0%, rgba(144, 255, 192, 0.03) 100%);
-  box-shadow: 0 0 16px rgba(144, 255, 192, 0.4);
+  background: linear-gradient(90deg, rgba(var(--loading-sweep-rgb), 0.9) 0%, rgba(var(--loading-sweep-rgb), 0.03) 100%);
+  box-shadow: 0 0 16px rgba(var(--loading-sweep-rgb), 0.4);
 }
 
 .loadingVisualReticle {
@@ -163,12 +181,12 @@
   top: 50%;
   width: 14%;
   aspect-ratio: 1;
-  border: var(--stroke-1) solid rgba(154, 255, 199, 0.72);
+  border: var(--stroke-1) solid rgba(var(--loading-reticle-rgb), 0.72);
   border-radius: 999px;
-  transform: translate(-50%, -50%) scale(calc(0.88 + var(--loading-pulse) * 0.18));
+  transform: translate(-50%, -50%) scale(calc((0.88 + var(--loading-pulse) * 0.18) * var(--loading-reticle-scale)));
   box-shadow:
-    0 0 22px rgba(122, 255, 177, 0.45),
-    inset 0 0 10px rgba(122, 255, 177, 0.2);
+    0 0 22px rgba(var(--loading-backdrop-primary-rgb), 0.45),
+    inset 0 0 10px rgba(var(--loading-backdrop-primary-rgb), 0.2);
 }
 
 .loadingVisualReticle::before,
@@ -177,7 +195,7 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  background: rgba(154, 255, 199, 0.72);
+  background: rgba(var(--loading-reticle-rgb), 0.72);
   transform: translate(-50%, -50%);
 }
 
@@ -200,9 +218,39 @@
 .loadingVisualParticle {
   position: absolute;
   border-radius: 999px;
-  background: rgba(160, 255, 205, 0.95);
-  box-shadow: 0 0 8px rgba(160, 255, 205, 0.7);
+  background: rgba(var(--loading-particle-rgb), 0.95);
+  box-shadow: 0 0 8px rgba(var(--loading-particle-rgb), 0.7);
   will-change: transform, opacity;
+}
+
+.loadingVisualLayer--preset-instrument {
+  --loading-backdrop-primary-rgb: 111, 255, 164;
+  --loading-backdrop-secondary-rgb: 64, 223, 135;
+  --loading-scanline-rgb: 113, 255, 165;
+  --loading-ring-rgb: 130, 255, 180;
+  --loading-sweep-rgb: 144, 255, 192;
+  --loading-reticle-rgb: 154, 255, 199;
+  --loading-particle-rgb: 160, 255, 205;
+}
+
+.loadingVisualLayer--preset-cosmic {
+  --loading-backdrop-primary-rgb: 135, 158, 255;
+  --loading-backdrop-secondary-rgb: 170, 123, 255;
+  --loading-scanline-rgb: 146, 173, 255;
+  --loading-ring-rgb: 152, 187, 255;
+  --loading-sweep-rgb: 194, 157, 255;
+  --loading-reticle-rgb: 201, 213, 255;
+  --loading-particle-rgb: 178, 186, 255;
+}
+
+.loadingVisualLayer--preset-hybrid {
+  --loading-backdrop-primary-rgb: 110, 240, 255;
+  --loading-backdrop-secondary-rgb: 78, 190, 220;
+  --loading-scanline-rgb: 126, 248, 236;
+  --loading-ring-rgb: 139, 238, 255;
+  --loading-sweep-rgb: 161, 255, 236;
+  --loading-reticle-rgb: 177, 255, 243;
+  --loading-particle-rgb: 168, 255, 246;
 }
 
 .loadingVisualLayer--medium .loadingVisualCore {
