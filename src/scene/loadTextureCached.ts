@@ -1,5 +1,10 @@
 import * as THREE from 'three'
 
+import {
+  toLoadingTraceErrorMetadata,
+  type BootLoadingTrace,
+  type BootTextureAssetKind,
+} from '../loading/bootLoadingTelemetry.js'
 import { resolveVitePublicUrl } from './resolveVitePublicUrl.js'
 
 // E2E/dev-only diagnostic counter for async texture loading.
@@ -41,6 +46,10 @@ export type LoadTextureCachedOptions = {
    * defaults (e.g. future non-sRGB maps).
    */
   colorSpace: THREE.ColorSpace
+
+  trace?: BootLoadingTrace
+  bodyId?: string
+  assetKind?: BootTextureAssetKind
 }
 
 export type CachedTextureHandle = {
@@ -100,6 +109,10 @@ const entryByKey = new Map<string, TextureCacheEntry>()
 
 function makeKey(args: { resolvedUrl: string; colorSpace: THREE.ColorSpace }): string {
   return `${args.resolvedUrl}|colorSpace:${args.colorSpace}`
+}
+
+function monotonicNowMs(): number {
+  return globalThis.performance?.now?.() ?? Date.now()
 }
 
 function disposeEntry(key: string, entry: TextureCacheEntry) {
@@ -173,10 +186,27 @@ export function clearTextureCache(options: { force?: boolean } = {}) {
 export async function loadTextureCached(url: string, options: LoadTextureCachedOptions): Promise<CachedTextureHandle> {
   const resolvedUrl = resolveVitePublicUrl(url)
   const colorSpace = options.colorSpace
+  const colorSpaceName = String(colorSpace)
   const key = makeKey({ resolvedUrl, colorSpace })
+  const trace = options.trace
+  const textureMetadata = {
+    url,
+    resolvedUrl,
+    colorSpace: colorSpaceName,
+    bodyId: options.bodyId,
+    assetKind: options.assetKind,
+  }
 
   let entry = entryByKey.get(key)
+
+  trace?.emit('textureCacheLookup', {
+    ...textureMetadata,
+    cacheHit: Boolean(entry),
+  })
+
   if (!entry) {
+    const loadStartTimeMs = monotonicNowMs()
+
     const newEntry: TextureCacheEntry = {
       resolvedUrl,
       colorSpace,
@@ -186,6 +216,11 @@ export async function loadTextureCached(url: string, options: LoadTextureCachedO
     }
 
     incrementPendingTextureLoads()
+
+    trace?.emit('textureLoadStarted', {
+      ...textureMetadata,
+      cacheHit: false,
+    })
 
     newEntry.promise = loader
       .loadAsync(resolvedUrl)
@@ -220,9 +255,31 @@ export async function loadTextureCached(url: string, options: LoadTextureCachedO
           disposeEntry(key, newEntry)
         }
 
+        const loadEndTimeMs = monotonicNowMs()
+
+        trace?.emit('textureLoadCompleted', {
+          ...textureMetadata,
+          cacheHit: false,
+          durationMs: loadEndTimeMs - loadStartTimeMs,
+        })
+
         return tex
       })
       .catch((err) => {
+        const failureKind =
+          err instanceof TextureCacheStaleError
+            ? 'staleEntry'
+            : err instanceof TextureCacheClearedError
+              ? 'cacheCleared'
+              : 'loadError'
+
+        trace?.emit('textureLoadFailed', {
+          ...textureMetadata,
+          cacheHit: false,
+          failureKind,
+          ...toLoadingTraceErrorMetadata(err),
+        })
+
         // Allow retries if a transient load fails.
         if (entryByKey.get(key) === newEntry) {
           entryByKey.delete(key)

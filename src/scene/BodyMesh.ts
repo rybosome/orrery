@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 
+import type { BootLoadingTrace, BootTextureAssetKind } from '../loading/bootLoadingTelemetry.js'
 import { isTextureCacheClearedError, loadTextureCached } from './loadTextureCached.js'
 import { createRingMesh } from './RingMesh.js'
 import {
@@ -14,6 +15,8 @@ import { isDev } from '../utils/isDev.js'
 export type CreateBodyMeshOptions = {
   /** Optional stable ID (e.g. `"EARTH"`) for body-specific rendering. */
   bodyId?: string
+
+  trace?: BootLoadingTrace
 
   appearance: BodyAppearanceStyle
 }
@@ -424,10 +427,21 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
   geometry.rotateX(Math.PI / 2)
 
   let disposed = false
+  const trace = options.trace
+
+  trace?.emit('bodyAssetsInitStarted', {
+    bodyId: options.bodyId,
+  })
 
   const warnOnce = createWarnOnce()
 
   const isEarth = options.bodyId === 'EARTH'
+
+  const textureTrace = (assetKind: BootTextureAssetKind) => ({
+    trace,
+    bodyId: options.bodyId,
+    assetKind,
+  })
 
   // Collect async assets so `ready` consistently represents "all appearance assets are ready".
   const readyExtras: Promise<void>[] = []
@@ -565,7 +579,10 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
   if (textureUrl) {
     readyExtras.push(
-      loadTextureCached(textureUrl, { colorSpace: THREE.SRGBColorSpace })
+      loadTextureCached(textureUrl, {
+        colorSpace: THREE.SRGBColorSpace,
+        ...textureTrace('surfaceMap'),
+      })
         .then(({ texture: tex, release }) => {
           let installed = false
           try {
@@ -598,7 +615,10 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
   if (normalTextureUrl) {
     readyExtras.push(
-      loadTextureCached(normalTextureUrl, { colorSpace: THREE.NoColorSpace })
+      loadTextureCached(normalTextureUrl, {
+        colorSpace: THREE.NoColorSpace,
+        ...textureTrace('normalMap'),
+      })
         .then(({ texture: tex, release }) => {
           let installed = false
           try {
@@ -628,7 +648,10 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
   if (roughnessTextureUrl) {
     readyExtras.push(
-      loadTextureCached(roughnessTextureUrl, { colorSpace: THREE.NoColorSpace })
+      loadTextureCached(roughnessTextureUrl, {
+        colorSpace: THREE.NoColorSpace,
+        ...textureTrace('roughnessMap'),
+      })
         .then(({ texture: tex, release }) => {
           let installed = false
           try {
@@ -667,6 +690,8 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
         textureUrl: options.appearance.rings.textureUrl,
         color: options.appearance.rings.color,
         baseOpacity: options.appearance.rings.baseOpacity,
+        trace,
+        bodyId: options.bodyId,
       })
     : undefined
 
@@ -1306,7 +1331,10 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
     if (earth.nightLightsTextureUrl) {
       extras.push(
-        loadTextureCached(earth.nightLightsTextureUrl, { colorSpace: THREE.SRGBColorSpace })
+        loadTextureCached(earth.nightLightsTextureUrl, {
+          colorSpace: THREE.SRGBColorSpace,
+          ...textureTrace('earthNightLightsMap'),
+        })
           .then(({ texture: tex, release }) => {
             let installed = false
             try {
@@ -1335,7 +1363,10 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
     if (earth.cloudsTextureUrl) {
       extras.push(
-        loadTextureCached(earth.cloudsTextureUrl, { colorSpace: THREE.SRGBColorSpace })
+        loadTextureCached(earth.cloudsTextureUrl, {
+          colorSpace: THREE.SRGBColorSpace,
+          ...textureTrace('earthCloudsMap'),
+        })
           .then(({ texture: tex, release }) => {
             let installed = false
             try {
@@ -1363,7 +1394,10 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
     if (earth.waterMaskTextureUrl) {
       extras.push(
-        loadTextureCached(earth.waterMaskTextureUrl, { colorSpace: THREE.NoColorSpace })
+        loadTextureCached(earth.waterMaskTextureUrl, {
+          colorSpace: THREE.NoColorSpace,
+          ...textureTrace('earthWaterMaskMap'),
+        })
           .then(({ texture: tex, release }) => {
             let installed = false
             try {
@@ -1407,7 +1441,11 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     })
   }
 
-  const ready = Promise.all(readyExtras).then(() => undefined)
+  const ready = Promise.all(readyExtras).then(() => {
+    trace?.emit('bodyAssetsInitCompleted', {
+      bodyId: options.bodyId,
+    })
+  })
 
   return {
     mesh,

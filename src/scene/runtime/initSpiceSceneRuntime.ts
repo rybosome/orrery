@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { SpiceAsync, StateVector } from '@rybosome/tspice'
 
 import { computeOrbitAnglesToKeepPointInView, isDirectionWithinFov } from '../../controls/sunFocus.js'
+import type { BootLoadingTrace } from '../../loading/bootLoadingTelemetry.js'
 import { createSpiceClient } from '../../spice/createSpiceClient.js'
 import { J2000_FRAME, type BodyRef, type EtSeconds, type Mat3, type Vec3Km } from '../../spice/types.js'
 import { createBodyMesh } from '../BodyMesh.js'
@@ -86,6 +87,8 @@ export async function initSpiceSceneRuntime(args: {
   /** Called as soon as the (cached) SpiceAsync client is ready. */
   onSpiceClientLoaded?: (spice: SpiceAsync) => void
 
+  trace?: BootLoadingTrace
+
   kmToWorld: number
   sunOcclusionMarginRad: number
 
@@ -123,6 +126,7 @@ export async function initSpiceSceneRuntime(args: {
     container,
     pickables,
     onSpiceClientLoaded,
+    trace,
     kmToWorld,
     sunOcclusionMarginRad,
     computeFocusRadius,
@@ -151,11 +155,12 @@ export async function initSpiceSceneRuntime(args: {
   scene.add(dir)
   sceneObjects.push(dir)
 
-  const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient()
+  const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient({ trace })
 
   disposers.push(disposeSpice)
 
   onSpiceClientLoaded?.(cachedSpice)
+  trace?.emit('sceneSpiceClientLoaded')
 
   if (isDisposed()) {
     // Best-effort cleanup of any scene-owned objects created so far.
@@ -170,8 +175,12 @@ export async function initSpiceSceneRuntime(args: {
   //
   // Also: do this *before* applying any startup ET override, because
   // `timeStore.setEtSec` clamps to the current scrub range.
+  trace?.emit('sceneScrubRangeComputeStarted')
   const scrubRange = await computeViewerScrubRangeEt({ spice: cachedSpice })
   if (scrubRange) timeStore.setScrubRange(scrubRange.minEtSec, scrubRange.maxEtSec)
+  trace?.emit('sceneScrubRangeComputeCompleted', {
+    hasRange: Boolean(scrubRange),
+  })
 
   // Optional e2e-only initial ET override from runtime config.
   if (initialEt != null) {
@@ -203,6 +212,10 @@ export async function initSpiceSceneRuntime(args: {
     ],
   }
 
+  trace?.emit('sceneBodyAssetsInitStarted', {
+    bodyCount: sceneModel.bodies.length,
+  })
+
   const bodies = sceneModel.bodies.map((body) => {
     const registry = resolveBodyRegistryEntry(String(body.body)) ?? getBodyRegistryEntryByBodyRef(body.body)
     const bodyId = registry?.id
@@ -210,6 +223,7 @@ export async function initSpiceSceneRuntime(args: {
     const { mesh, dispose, ready, update } = createBodyMesh({
       bodyId,
       appearance: body.style.appearance,
+      trace,
     })
 
     mesh.userData.bodyId = bodyId ?? body.body
@@ -259,6 +273,10 @@ export async function initSpiceSceneRuntime(args: {
 
   // Ensure textures are loaded before we mark the scene as rendered.
   await Promise.all(bodies.map((b) => b.ready))
+
+  trace?.emit('sceneBodyAssetsInitCompleted', {
+    bodyCount: bodies.length,
+  })
 
   if (isDisposed()) {
     for (const obj of sceneObjects) scene.remove(obj)
@@ -718,6 +736,10 @@ export async function initSpiceSceneRuntime(args: {
     for (const dispose of disposers) dispose()
     clearTextureCache({ force: true })
   }
+
+  trace?.emit('sceneRuntimeReady', {
+    bodyCount: bodies.length,
+  })
 
   return {
     spice: cachedSpice,
