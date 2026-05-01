@@ -1,5 +1,6 @@
 import type { SpiceAsync } from '@rybosome/tspice'
 
+import type { LoadingVisualPresetDiagnostics } from '../loading/convergence/index.js'
 import { LOADING_PHASE_ORDER, type LoadingPhase, type LoadingState } from '../loading/loadingStore.js'
 import {
   LOADING_READINESS_SUBSYSTEM_ORDER,
@@ -84,6 +85,7 @@ export interface TspiceViewerBootDiagnosticsPayload {
       height: number
       devicePixelRatio: number
     }
+    loadingVisual: LoadingVisualPresetDiagnostics | null
   }
 }
 
@@ -165,6 +167,7 @@ export function captureTspiceViewerBootDiagnostics(args: {
   isE2e: boolean
   status: TspiceViewerBootDiagnosticsStatus
   loadingState: LoadingState
+  loadingVisual?: LoadingVisualPresetDiagnostics
 }): TspiceViewerBootDiagnosticsPayload | null {
   if (!args.isE2e) return null
 
@@ -237,6 +240,7 @@ export function captureTspiceViewerBootDiagnostics(args: {
         height: window.innerHeight,
         devicePixelRatio: window.devicePixelRatio,
       },
+      loadingVisual: args.loadingVisual ? cloneJson(args.loadingVisual) : null,
     },
   }
 

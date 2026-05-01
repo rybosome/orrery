@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 
-import type { LoadingConvergencePrimitives } from '../../loading/convergence/index.js'
+import type {
+  LoadingConvergencePrimitives,
+  LoadingVisualPresetKey,
+  LoadingVisualPresetOverlayAffordance,
+} from '../../loading/convergence/index.js'
 import type { DeviceTier, DeviceTierBudgets } from '../../loading/deviceTier.js'
 
 type CssVars = CSSProperties & Record<`--${string}`, string | number>
@@ -20,6 +24,8 @@ export interface LoadingOverlayProps {
   primitives: LoadingConvergencePrimitives
   deviceTier: DeviceTier
   budget: DeviceTierBudgets
+  preset: LoadingVisualPresetKey
+  presetAffordance: LoadingVisualPresetOverlayAffordance
 }
 
 /**
@@ -28,7 +34,13 @@ export interface LoadingOverlayProps {
  * The layer is fully non-interactive (`pointer-events: none`) and uses
  * capability-tier budgets to cap update rate + effect complexity.
  */
-export function LoadingOverlay({ primitives, deviceTier, budget }: LoadingOverlayProps) {
+export function LoadingOverlay({
+  primitives,
+  deviceTier,
+  budget,
+  preset,
+  presetAffordance,
+}: LoadingOverlayProps) {
   const [clockMs, setClockMs] = useState(0)
 
   const shouldAnimate = primitives.showOverlay
@@ -73,20 +85,31 @@ export function LoadingOverlay({ primitives, deviceTier, budget }: LoadingOverla
   const clockSec = clockMs / 1000
   const pulse = 0.5 + 0.5 * Math.sin(clockSec * primitives.pulseHz * Math.PI * 2)
 
-  const sweepOrbitDeg = clockSec * (16 + primitives.convergence * 84)
+  const sweepOrbitDeg = clockSec * (16 + primitives.convergence * 84) * presetAffordance.sweepSpeed
   const sweepAngleDeg = (primitives.sweepAngleDeg + sweepOrbitDeg) % 360
 
   const layerStyle: CssVars = {
     opacity: primitives.overlayOpacity,
-    '--loading-effect-intensity': (budget.loadingEffectIntensity * primitives.glowIntensity).toFixed(4),
-    '--loading-scanline-opacity': (primitives.scanlineOpacity * budget.loadingEffectIntensity).toFixed(4),
+    '--loading-effect-intensity': (
+      budget.loadingEffectIntensity *
+      primitives.glowIntensity *
+      presetAffordance.glowStrength
+    ).toFixed(4),
+    '--loading-scanline-opacity': (
+      primitives.scanlineOpacity *
+      budget.loadingEffectIntensity *
+      presetAffordance.backdropStrength
+    ).toFixed(4),
     '--loading-scanline-count': budget.loadingScanlineCount,
     '--loading-pulse': pulse.toFixed(4),
+    '--loading-backdrop-strength': presetAffordance.backdropStrength.toFixed(4),
+    '--loading-reticle-scale': presetAffordance.reticleScale.toFixed(4),
   }
 
   const className = [
     'loadingVisualLayer',
     `loadingVisualLayer--${deviceTier}`,
+    `loadingVisualLayer--preset-${preset}`,
     primitives.hasFailure ? 'loadingVisualLayer--failed' : null,
   ]
     .filter(Boolean)
@@ -100,13 +123,17 @@ export function LoadingOverlay({ primitives, deviceTier, budget }: LoadingOverla
       <div className="loadingVisualCore">
         {rings.map((ring, index) => {
           const normalized = (index + 1) / (rings.length + 1)
-          const ringTravel = Math.sin(clockSec * (0.35 + normalized * 0.5) + ring * 1.3)
+          const ringTravel =
+            Math.sin(clockSec * (0.35 + normalized * 0.5) * presetAffordance.sweepSpeed + ring * 1.3) *
+            presetAffordance.backdropStrength
+
           const diameterPct = 25 + normalized * 58 + ringTravel * 0.9 * primitives.ringCompression
 
           const ringOpacity =
             (1 - normalized * 0.45) *
             (0.25 + (1 - primitives.convergence) * 0.75) *
             budget.loadingEffectIntensity *
+            presetAffordance.glowStrength *
             (0.6 + pulse * 0.4)
 
           const ringStyle: CSSProperties = {
@@ -130,7 +157,9 @@ export function LoadingOverlay({ primitives, deviceTier, budget }: LoadingOverla
       <div className="loadingVisualParticleField">
         {particles.map((particle) => {
           const driftPhase = clockSec * primitives.pulseHz + particle.phaseOffsetRad
-          const driftScale = 0.3 + primitives.ringCompression * 0.7
+          const driftScale =
+            (0.3 + primitives.ringCompression * 0.7) * presetAffordance.particleDrift
+
           const driftX = Math.sin(driftPhase) * particle.driftPx * driftScale
           const driftY = Math.cos(driftPhase * 0.82) * particle.driftPx * driftScale
 
@@ -138,6 +167,7 @@ export function LoadingOverlay({ primitives, deviceTier, budget }: LoadingOverla
             particle.baseOpacity *
               primitives.particleOpacity *
               budget.loadingEffectIntensity *
+              presetAffordance.glowStrength *
               (0.45 + 0.55 * pulse),
           )
 
