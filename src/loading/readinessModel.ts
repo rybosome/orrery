@@ -144,9 +144,9 @@ export function computeLoadingReadinessValue(
 /**
  * Reduce readiness state from one boot telemetry event.
  *
-* The reducer is pure and mostly monotonic, with explicit down-adjustments only
-* for authoritative telemetry accounting (for example startup asset readiness
-* ratios that include failed required assets).
+ * The reducer is pure and mostly monotonic, with explicit down-adjustments only
+ * for authoritative telemetry accounting (for example startup asset readiness
+ * ratios that include failed required assets).
  */
 export function reduceLoadingReadinessState(
   state: LoadingReadinessState,

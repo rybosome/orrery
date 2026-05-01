@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test'
 
+import { collectBootBaselineSample } from './baselineCapture'
+
 test.use({
   viewport: { width: 900, height: 650 },
   deviceScaleFactor: 1,
 })
 
-test('viewer loads (WASM backend) without console/page errors', async ({ page, baseURL }) => {
+test('viewer loads (WASM backend) without console/page errors', async ({ page, baseURL }, testInfo) => {
   const allowedOrigin = baseURL ? new URL(baseURL).origin : 'http://127.0.0.1:4173'
 
   // Ensure the test is deterministic and doesn't accidentally hit the network.
@@ -45,6 +47,21 @@ test('viewer loads (WASM backend) without console/page errors', async ({ page, b
   }
 
   expect(errors).toEqual([])
+
+  await page.evaluate(() => {
+    ;(window as any).__tspice_viewer__e2e?.samplePerfCounters?.()
+  })
+
+  await collectBootBaselineSample({
+    page,
+    testInfo,
+    scenario: 'fake-backend-smoke',
+    runType: 'cold',
+    tags: ['backend-smoke', 'wasm'],
+    metadata: {
+      route: '/?e2e=1&et=1234567',
+    },
+  })
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()

@@ -15,7 +15,7 @@ import { computeOrbitAnglesToKeepPointInView, isDirectionWithinFov } from './con
 import { HelpOverlay } from './ui/HelpOverlay.js'
 import { InfoOverlay } from './ui/InfoOverlay.js'
 import { SelectionInspector } from './ui/SelectionInspector.js'
-import { markTspiceViewerRenderedScene } from './e2eHooks/index.js'
+import { captureTspiceViewerBootDiagnostics, markTspiceViewerRenderedScene } from './e2eHooks/index.js'
 import { installSceneInteractions, type SceneInteractions } from './interaction/installSceneInteractions.js'
 import { createBootLoadingTrace, toLoadingTraceErrorMetadata } from './loading/bootLoadingTelemetry.js'
 import { createBootLoadingStoreSink, loadingStore } from './loading/loadingStore.js'
@@ -1610,10 +1610,22 @@ export function SceneCanvas() {
         markTspiceViewerRenderedScene({ isE2e })
 
         loadingTrace.emit('bootCompleted', { isE2e })
+
+        captureTspiceViewerBootDiagnostics({
+          isE2e,
+          status: 'completed',
+          loadingState: loadingStore.getSnapshot(),
+        })
       } catch (err) {
         loadingTrace.emit('bootFailed', {
           phase: bootPhase,
           ...toLoadingTraceErrorMetadata(err),
+        })
+
+        captureTspiceViewerBootDiagnostics({
+          isE2e,
+          status: 'failed',
+          loadingState: loadingStore.getSnapshot(),
         })
 
         // Surface initialization failures to the console so e2e tests can catch them.

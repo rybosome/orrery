@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { collectBootBaselineSample } from './baselineCapture'
+
 test.use({
   viewport: { width: 900, height: 650 },
   deviceScaleFactor: 1,
@@ -60,12 +62,23 @@ const waitForViewerReadyForScreenshot = async (
   }, renders)
 }
 
-test('sun postprocessing: whole-frame bloom + tonemap', async ({ page, baseURL }) => {
+test('sun postprocessing: whole-frame bloom + tonemap', async ({ page, baseURL }, testInfo) => {
   await setupDeterminismAndNetworkBlock(page, baseURL)
 
-  await page.goto('/?e2e=1&et=1234567&sunPostprocessMode=wholeFrame&sunToneMap=filmic')
+  const route = '/?e2e=1&et=1234567&sunPostprocessMode=wholeFrame&sunToneMap=filmic'
+
+  await page.goto(route)
 
   await waitForViewerReadyForScreenshot(page)
+
+  await collectBootBaselineSample({
+    page,
+    testInfo,
+    scenario: 'sun-postprocess-whole-frame',
+    runType: 'cold',
+    tags: ['sun-postprocess', 'whole-frame', 'filmic'],
+    metadata: { route },
+  })
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()
@@ -77,12 +90,23 @@ test('sun postprocessing: whole-frame bloom + tonemap', async ({ page, baseURL }
   })
 })
 
-test('sun postprocessing: sun-isolated selective bloom + tonemap', async ({ page, baseURL }) => {
+test('sun postprocessing: sun-isolated selective bloom + tonemap', async ({ page, baseURL }, testInfo) => {
   await setupDeterminismAndNetworkBlock(page, baseURL)
 
-  await page.goto('/?e2e=1&et=1234567&sunPostprocessMode=sunIsolated&sunToneMap=filmic')
+  const route = '/?e2e=1&et=1234567&sunPostprocessMode=sunIsolated&sunToneMap=filmic'
+
+  await page.goto(route)
 
   await waitForViewerReadyForScreenshot(page)
+
+  await collectBootBaselineSample({
+    page,
+    testInfo,
+    scenario: 'sun-postprocess-sun-isolated-filmic',
+    runType: 'cold',
+    tags: ['sun-postprocess', 'sun-isolated', 'filmic'],
+    metadata: { route },
+  })
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()
@@ -93,13 +117,24 @@ test('sun postprocessing: sun-isolated selective bloom + tonemap', async ({ page
   })
 })
 
-test('sun postprocessing: sun-isolated selective bloom (default tonemap)', async ({ page, baseURL }) => {
+test('sun postprocessing: sun-isolated selective bloom (default tonemap)', async ({ page, baseURL }, testInfo) => {
   await setupDeterminismAndNetworkBlock(page, baseURL)
 
   // Intentionally omit `sunToneMap` so we cover the `sunIsolated` default (none).
-  await page.goto('/?e2e=1&et=1234567&sunPostprocessMode=sunIsolated')
+  const route = '/?e2e=1&et=1234567&sunPostprocessMode=sunIsolated'
+
+  await page.goto(route)
 
   await waitForViewerReadyForScreenshot(page, { renders: 8 })
+
+  await collectBootBaselineSample({
+    page,
+    testInfo,
+    scenario: 'sun-postprocess-sun-isolated-default-tonemap',
+    runType: 'cold',
+    tags: ['sun-postprocess', 'sun-isolated', 'default-tonemap'],
+    metadata: { route },
+  })
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()
