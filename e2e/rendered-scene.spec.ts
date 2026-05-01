@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test'
 
+import { collectColdWarmBootBaselinePair } from './baselineCapture'
+
 test.use({
   viewport: { width: 900, height: 650 },
   deviceScaleFactor: 1,
 })
 
-test('rendered scene is visually stable (golden screenshot)', async ({ page, baseURL }) => {
+test('rendered scene is visually stable (golden screenshot)', async ({ page, baseURL }, testInfo) => {
   const allowedOrigin = baseURL ? new URL(baseURL).origin : 'http://127.0.0.1:4173'
   const abortedTexturePathnames = new Set([
     '/static/textures/planets/earth.png',
@@ -42,19 +44,27 @@ test('rendered scene is visually stable (golden screenshot)', async ({ page, bas
     Math.random = () => 0.42
   })
 
+  const waitForViewerReady = async () => {
+    await page.waitForFunction(() => (window as any).__tspice_viewer__rendered_scene === true)
+  }
+
+  const stabilizeForCapture = async () => {
+    await page.evaluate(() => {
+      ;(window as any).__tspice_viewer__e2e?.lockDeterministicLighting?.()
+      ;(window as any).__tspice_viewer__e2e?.samplePerfCounters?.()
+    })
+  }
+
   // Use a fixed ET to drive a deterministic render.
   await page.goto('/?e2e=1&et=1234567')
 
-  await page.waitForFunction(() => (window as any).__tspice_viewer__rendered_scene === true)
+  await waitForViewerReady()
 
   const canvas = page.locator('canvas.sceneCanvas')
   await expect(canvas).toBeVisible()
 
   // Force a final render and lock deterministic lighting before capturing the golden.
-  await page.evaluate(() => {
-    ;(window as any).__tspice_viewer__e2e?.lockDeterministicLighting?.()
-    ;(window as any).__tspice_viewer__e2e?.samplePerfCounters?.()
-  })
+  await stabilizeForCapture()
 
   await expect(canvas).toHaveScreenshot('rendered-scene.png', {
     animations: 'disabled',
@@ -63,5 +73,19 @@ test('rendered scene is visually stable (golden screenshot)', async ({ page, bas
     // more headroom to keep the golden stable across GPU/driver differences.
     maxDiffPixelRatio: 0.04,
     maxDiffPixels: process.env.CI ? 2500 : 500,
+  })
+
+  await collectColdWarmBootBaselinePair({
+    page,
+    testInfo,
+    scenario: 'rendered-scene-golden',
+    tags: ['boot', 'visual-regression'],
+    metadata: {
+      route: '/?e2e=1&et=1234567',
+    },
+    waitForReady: async () => {
+      await waitForViewerReady()
+      await stabilizeForCapture()
+    },
   })
 })
