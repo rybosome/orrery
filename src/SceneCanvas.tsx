@@ -17,7 +17,8 @@ import { InfoOverlay } from './ui/InfoOverlay.js'
 import { SelectionInspector } from './ui/SelectionInspector.js'
 import { markTspiceViewerRenderedScene } from './e2eHooks/index.js'
 import { installSceneInteractions, type SceneInteractions } from './interaction/installSceneInteractions.js'
-import { createNoopBootLoadingTrace, toLoadingTraceErrorMetadata } from './loading/bootLoadingTelemetry.js'
+import { createBootLoadingTrace, toLoadingTraceErrorMetadata } from './loading/bootLoadingTelemetry.js'
+import { createBootLoadingStoreSink, loadingStore } from './loading/loadingStore.js'
 import {
   getHomePresetState,
   getHomePresetStateForKey,
@@ -1239,7 +1240,10 @@ export function SceneCanvas() {
     const { isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld } =
       initRuntimeConfigRef.current
 
-    const loadingTrace = createNoopBootLoadingTrace()
+    loadingStore.reset()
+    const loadingTrace = createBootLoadingTrace({
+      sink: createBootLoadingStoreSink(loadingStore),
+    })
     loadingTrace.emit('bootStarted', {
       isE2e,
       enableLogDepth,
