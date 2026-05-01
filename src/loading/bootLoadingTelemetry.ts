@@ -1,4 +1,9 @@
-import { createNoopLoadingTrace, type LoadingTrace } from './loadingTrace.js'
+import {
+  createLoadingTrace,
+  createNoopLoadingTrace,
+  type CreateLoadingTraceOptions,
+  type LoadingTrace,
+} from './loadingTrace.js'
 
 export type BootTextureAssetKind =
   | 'surfaceMap'
@@ -184,6 +189,15 @@ export type BootLoadingEventMap = {
 }
 
 export type BootLoadingTrace = LoadingTrace<BootLoadingEventMap>
+
+/**
+ * Create a typed boot-loading trace.
+ */
+export function createBootLoadingTrace(
+  options: CreateLoadingTraceOptions<BootLoadingEventMap> = {},
+): BootLoadingTrace {
+  return createLoadingTrace<BootLoadingEventMap>(options)
+}
 
 /**
  * Create a typed boot-loading trace with no configured sink.
