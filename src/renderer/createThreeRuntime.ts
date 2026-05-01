@@ -66,6 +66,9 @@ export function createThreeRuntime(args: {
   isE2e: boolean
   enableLogDepth: boolean
 
+  /** Device-tier quality clamp for renderer pixel ratio. */
+  maxPixelRatio?: number
+
   starSeed: number
   animatedSky: boolean
   twinkleEnabled: boolean
@@ -108,6 +111,8 @@ export function createThreeRuntime(args: {
     trace,
   } = args
 
+  const maxPixelRatio = sanitizePixelRatioCap(args.maxPixelRatio ?? 2)
+
   let disposed = false
 
   let scheduledFrame: number | null = null
@@ -131,7 +136,7 @@ export function createThreeRuntime(args: {
   renderer.autoClear = false
 
   // Keep e2e snapshots stable by not depending on deviceScaleFactor.
-  renderer.setPixelRatio(isE2e ? 1 : Math.min(window.devicePixelRatio, 2))
+  renderer.setPixelRatio(isE2e ? 1 : Math.min(window.devicePixelRatio, maxPixelRatio))
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.NoToneMapping
 
@@ -204,7 +209,7 @@ export function createThreeRuntime(args: {
           const height = container.clientHeight
           if (width <= 0 || height <= 0) return undefined
 
-          const pixelRatio = Math.min(window.devicePixelRatio, 2)
+          const pixelRatio = Math.min(window.devicePixelRatio, maxPixelRatio)
           return {
             widthPx: Math.max(1, Math.floor(width * pixelRatio)),
             heightPx: Math.max(1, Math.floor(height * pixelRatio)),
@@ -785,7 +790,7 @@ export function createThreeRuntime(args: {
     const height = container.clientHeight
     if (width <= 0 || height <= 0) return
 
-    const nextPixelRatio = isE2e ? 1 : Math.min(window.devicePixelRatio, 2)
+    const nextPixelRatio = isE2e ? 1 : Math.min(window.devicePixelRatio, maxPixelRatio)
 
     // Avoid repeating expensive resize work when the observable inputs haven't
     // changed (e.g. init-time prime + ResizeObserver fire in the same layout).
@@ -991,4 +996,9 @@ export function createThreeRuntime(args: {
 
     dispose,
   }
+}
+
+function sanitizePixelRatioCap(value: number): number {
+  if (!Number.isFinite(value)) return 2
+  return THREE.MathUtils.clamp(value, 1, 2)
 }

@@ -14,11 +14,14 @@ import { computeOrbitAnglesToKeepPointInView, isDirectionWithinFov } from './con
 
 import { HelpOverlay } from './ui/HelpOverlay.js'
 import { InfoOverlay } from './ui/InfoOverlay.js'
+import { LoadingOverlay } from './ui/loading/LoadingOverlay.js'
 import { SelectionInspector } from './ui/SelectionInspector.js'
 import { captureTspiceViewerBootDiagnostics, markTspiceViewerRenderedScene } from './e2eHooks/index.js'
 import { installSceneInteractions, type SceneInteractions } from './interaction/installSceneInteractions.js'
 import { createBootLoadingTrace, toLoadingTraceErrorMetadata } from './loading/bootLoadingTelemetry.js'
-import { createBootLoadingStoreSink, loadingStore } from './loading/loadingStore.js'
+import { computeConvergencePrimitives } from './loading/convergence/index.js'
+import { detectDeviceTier } from './loading/deviceTier.js'
+import { createBootLoadingStoreSink, loadingStore, useLoadingStoreSelector } from './loading/loadingStore.js'
 import {
   getHomePresetState,
   getHomePresetStateForKey,
@@ -307,6 +310,22 @@ export function SceneCanvas() {
     sunBloomResolutionScale,
   } = runtimeConfig
 
+  const loadingPhase = useLoadingStoreSelector((state) => state.phase)
+  const loadingReadinessValue = useLoadingStoreSelector((state) => state.readiness.value)
+  const loadingHasFailure = useLoadingStoreSelector((state) => state.failure != null)
+
+  const loadingConvergencePrimitives = useMemo(
+    () =>
+      computeConvergencePrimitives({
+        phase: loadingPhase,
+        readinessValue: loadingReadinessValue,
+        hasFailure: loadingHasFailure,
+      }),
+    [loadingPhase, loadingReadinessValue, loadingHasFailure],
+  )
+
+  const deviceTierProfile = useMemo(() => detectDeviceTier({ isE2e }), [isE2e])
+
   const [focusBody, setFocusBody] = useState<BodyRef>('EARTH')
   const [showJ2000Axes, setShowJ2000Axes] = useState(false)
   const [showBodyFixedAxes, setShowBodyFixedAxes] = useState(false)
@@ -458,6 +477,7 @@ export function SceneCanvas() {
     sunBloomStrength,
     sunBloomRadius,
     sunBloomResolutionScale,
+    rendererMaxPixelRatio: deviceTierProfile.budgets.maxRendererPixelRatio,
     kmToWorld,
     animatedSky,
     twinkleEnabled,
@@ -1237,7 +1257,7 @@ export function SceneCanvas() {
     const container = containerRef.current
     if (!canvas || !container) return
 
-    const { isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld } =
+    const { isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld, rendererMaxPixelRatio } =
       initRuntimeConfigRef.current
 
     loadingStore.reset()
@@ -1277,6 +1297,7 @@ export function SceneCanvas() {
       container,
       isE2e,
       enableLogDepth,
+      maxPixelRatio: rendererMaxPixelRatio,
       starSeed,
       animatedSky,
       twinkleEnabled,
@@ -2434,6 +2455,14 @@ export function SceneCanvas() {
       ) : null}
 
       <canvas ref={canvasRef} className="sceneCanvas" />
+
+      {!isE2e ? (
+        <LoadingOverlay
+          primitives={loadingConvergencePrimitives}
+          deviceTier={deviceTierProfile.tier}
+          budget={deviceTierProfile.budgets}
+        />
+      ) : null}
 
       {/* Render HUD overlays */}
       {showRenderHud && <RenderHud stats={hudStats} />}
