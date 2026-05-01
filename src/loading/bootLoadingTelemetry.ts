@@ -19,6 +19,17 @@ export type LoadingTraceErrorMetadata = {
   errorMessage: string
 }
 
+export type BootStartupAssetAccountingMetadata = {
+  startupAssetTotal: number
+  startupAssetRequired: number
+  startupAssetCompleted: number
+  startupAssetFailed: number
+  startupAssetPending: number
+  startupAssetReadinessRatio: number
+}
+
+export type BootSnapshotParseOutcome = 'not_found' | 'valid' | 'invalid_payload' | 'failed'
+
 export type BootLoadingEventMap = {
   bootStarted: {
     isE2e: boolean
@@ -48,6 +59,36 @@ export type BootLoadingEventMap = {
   bootSnapshotLoadInvalid: {
     pathname: string
     errorCode: string
+    errorMessage: string
+  }
+  bootSnapshotParseStarted: {
+    pathname: string
+  }
+  bootSnapshotParseCompleted: {
+    pathname: string
+    durationMs: number
+    outcome: BootSnapshotParseOutcome
+  }
+  bootSnapshotParseFailed: {
+    pathname: string
+    payload?: string
+    errorCode: string
+    errorMessage: string
+  }
+  bootSnapshotApplyStarted: {
+    pathname: string
+    payload: string
+  }
+  bootSnapshotApplyCompleted: {
+    pathname: string
+    payload: string
+    durationMs: number
+  }
+  bootSnapshotApplyFailed: {
+    pathname: string
+    payload: string
+    durationMs: number
+    errorName: string
     errorMessage: string
   }
   rendererFirstFrameRequested: undefined
@@ -89,10 +130,10 @@ export type BootLoadingEventMap = {
   }
   sceneBodyAssetsInitStarted: {
     bodyCount: number
-  }
+  } & BootStartupAssetAccountingMetadata
   sceneBodyAssetsInitCompleted: {
     bodyCount: number
-  }
+  } & BootStartupAssetAccountingMetadata
   sceneRuntimeReady: {
     bodyCount: number
   }

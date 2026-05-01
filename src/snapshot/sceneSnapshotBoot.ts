@@ -1,3 +1,10 @@
+import {
+  toLoadingTraceErrorMetadata,
+  type BootLoadingTrace,
+  type BootSnapshotParseOutcome,
+} from '../loading/bootLoadingTelemetry.js'
+
+import { measureSnapshotApplyDuration, monotonicNowMs } from './sceneSnapshotAdapter.js'
 import { decodeSnapshot, type SceneSnapshotDecodeResult } from './sceneSnapshotCodec.js'
 import type { SceneSnapshotV1 } from './sceneSnapshot.js'
 
@@ -38,6 +45,7 @@ export type SceneSnapshotBootLoadInput = {
   applySnapshot: (snapshot: SceneSnapshotV1) => Promise<SceneSnapshotV1> | SceneSnapshotV1
   decodeSnapshotPayload?: (payload: string) => SceneSnapshotDecodeResult
   onInvalidPayload?: (result: Extract<SceneSnapshotBootLoadResult, { status: 'invalid_payload' }>) => void
+  trace?: BootLoadingTrace
 }
 
 /**
@@ -91,12 +99,52 @@ export function resolveSnapshotFromPathname(
 export async function loadSnapshotFromPathnameAtBoot(
   input: SceneSnapshotBootLoadInput,
 ): Promise<SceneSnapshotBootLoadResult> {
-  const resolved = resolveSnapshotFromPathname(input.pathname, input.decodeSnapshotPayload)
+  const trace = input.trace
+
+  trace?.emit('bootSnapshotParseStarted', {
+    pathname: input.pathname,
+  })
+  const parseStartedAtMs = monotonicNowMs()
+
+  const emitParseCompleted = (outcome: BootSnapshotParseOutcome) => {
+    trace?.emit('bootSnapshotParseCompleted', {
+      pathname: input.pathname,
+      durationMs: monotonicNowMs() - parseStartedAtMs,
+      outcome,
+    })
+  }
+
+  let resolved: SceneSnapshotPathResolution
+
+  try {
+    resolved = resolveSnapshotFromPathname(input.pathname, input.decodeSnapshotPayload)
+  } catch (error) {
+    const metadata = toLoadingTraceErrorMetadata(error)
+
+    trace?.emit('bootSnapshotParseFailed', {
+      pathname: input.pathname,
+      errorCode: 'exception',
+      errorMessage: `${metadata.errorName}: ${metadata.errorMessage}`,
+    })
+
+    emitParseCompleted('failed')
+    throw error
+  }
+
   if (resolved.kind === 'none') {
+    emitParseCompleted('not_found')
     return { status: 'not_found' }
   }
 
   if (resolved.kind === 'invalid') {
+    trace?.emit('bootSnapshotParseFailed', {
+      pathname: input.pathname,
+      payload: resolved.payload,
+      errorCode: resolved.errorCode,
+      errorMessage: resolved.errorMessage,
+    })
+    emitParseCompleted('invalid_payload')
+
     const invalidResult: Extract<SceneSnapshotBootLoadResult, { status: 'invalid_payload' }> = {
       status: 'invalid_payload',
       payload: resolved.payload,
@@ -108,10 +156,43 @@ export async function loadSnapshotFromPathnameAtBoot(
     return invalidResult
   }
 
-  const appliedSnapshot = await input.applySnapshot(resolved.snapshot)
-  return {
-    status: 'applied',
+  emitParseCompleted('valid')
+
+  trace?.emit('bootSnapshotApplyStarted', {
+    pathname: input.pathname,
     payload: resolved.payload,
-    snapshot: appliedSnapshot,
+  })
+
+  const applyStartedAtMs = monotonicNowMs()
+
+  try {
+    const { result: appliedSnapshot, durationMs } = await measureSnapshotApplyDuration(() =>
+      input.applySnapshot(resolved.snapshot),
+    )
+
+    trace?.emit('bootSnapshotApplyCompleted', {
+      pathname: input.pathname,
+      payload: resolved.payload,
+      durationMs,
+    })
+
+    return {
+      status: 'applied',
+      payload: resolved.payload,
+      snapshot: appliedSnapshot,
+    }
+  } catch (error) {
+    const metadata = toLoadingTraceErrorMetadata(error)
+
+    trace?.emit('bootSnapshotApplyFailed', {
+      pathname: input.pathname,
+      payload: resolved.payload,
+      durationMs: monotonicNowMs() - applyStartedAtMs,
+      errorName: metadata.errorName,
+      errorMessage: metadata.errorMessage,
+    })
+
+    throw error
   }
+
 }
