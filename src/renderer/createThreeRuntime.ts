@@ -7,6 +7,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { SUN_BLOOM_LAYER } from '../renderLayers.js'
 import { CameraController, type CameraControllerState } from '../controls/CameraController.js'
+import type { BootLoadingTrace } from '../loading/bootLoadingTelemetry.js'
 import { createSelectionOverlay, type SelectionOverlay } from '../scene/SelectionOverlay.js'
 import { createSkydome, type CreateSkydomeOptions } from '../scene/Skydome.js'
 import { createStarfield, type StarfieldHandle } from '../scene/Starfield.js'
@@ -78,6 +79,8 @@ export function createThreeRuntime(args: {
   initialCameraFovDeg: number
   getHomePresetState: (focusBody: BodyRef) => CameraControllerState | null
 
+  trace?: BootLoadingTrace
+
   /**
    * HUD accessors are read during render, so expose them via a getter to avoid
    * accidentally capturing stale values in closures.
@@ -102,6 +105,7 @@ export function createThreeRuntime(args: {
     initialFocusBody,
     initialCameraFovDeg,
     getHomePresetState,
+    trace,
   } = args
 
   let disposed = false
@@ -640,6 +644,9 @@ export function createThreeRuntime(args: {
   let lastHudUpdateMs = 0
   const hudUpdateIntervalMs = 150 // ~6-7 Hz
   const fpsBuffer: number[] = []
+  let firstFrameStarted = false
+  let firstFrameCommitted = false
+  let firstFrameCompleted = false
 
   const renderOnce = (timeMs?: number) => {
     if (disposed) return
@@ -648,6 +655,11 @@ export function createThreeRuntime(args: {
 
     const nowMs = timeMs ?? performance.now()
     const timeSec = nowMs * 0.001
+
+    if (!firstFrameStarted) {
+      firstFrameStarted = true
+      trace?.emit('rendererFirstFrameStarted', { nowMs })
+    }
 
     starfield?.update?.(timeSec)
     starfield?.syncToCamera(camera)
@@ -692,6 +704,11 @@ export function createThreeRuntime(args: {
 
       postprocessRuntime.finalComposer.render()
       postprocessRuntime.bloomOverlayComposer.render()
+    }
+
+    if (!firstFrameCommitted) {
+      firstFrameCommitted = true
+      trace?.emit('rendererFirstFrameCommitted', { nowMs })
     }
 
     afterRender?.({ nowMs })
@@ -742,6 +759,11 @@ export function createThreeRuntime(args: {
           focusBody: hud.getFocusBodyLabel(),
         })
       }
+    }
+
+    if (!firstFrameCompleted) {
+      firstFrameCompleted = true
+      trace?.emit('rendererFirstFrameCompleted', { nowMs })
     }
   }
 

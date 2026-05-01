@@ -17,6 +17,7 @@ import { InfoOverlay } from './ui/InfoOverlay.js'
 import { SelectionInspector } from './ui/SelectionInspector.js'
 import { markTspiceViewerRenderedScene } from './e2eHooks/index.js'
 import { installSceneInteractions, type SceneInteractions } from './interaction/installSceneInteractions.js'
+import { createNoopBootLoadingTrace, toLoadingTraceErrorMetadata } from './loading/bootLoadingTelemetry.js'
 import {
   getHomePresetState,
   getHomePresetStateForKey,
@@ -1238,6 +1239,14 @@ export function SceneCanvas() {
     const { isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld } =
       initRuntimeConfigRef.current
 
+    const loadingTrace = createNoopBootLoadingTrace()
+    loadingTrace.emit('bootStarted', {
+      isE2e,
+      enableLogDepth,
+      animatedSky,
+      twinkleEnabled,
+    })
+
     let disposed = false
 
     const pickables: THREE.Mesh[] = []
@@ -1255,6 +1264,9 @@ export function SceneCanvas() {
       getFocusBodyLabel: () => String(latestUiRef.current.focusBody),
       setStats: (next: RenderHudStats) => setHudStats(next),
     }
+
+    loadingTrace.emit('rendererRuntimeInitStarted')
+    const rendererRuntimeInitStartMs = performance.now()
 
     const three = createThreeRuntime({
       canvas,
@@ -1279,7 +1291,12 @@ export function SceneCanvas() {
       initialFocusBody: latestUiRef.current.focusBody,
       initialCameraFovDeg: latestUiRef.current.cameraFovDeg,
       getHomePresetState,
+      trace: loadingTrace,
       hud: () => hudApi,
+    })
+
+    loadingTrace.emit('rendererRuntimeInitCompleted', {
+      durationMs: performance.now() - rendererRuntimeInitStartMs,
     })
 
     rendererRuntimeRef.current = three
@@ -1348,7 +1365,12 @@ export function SceneCanvas() {
     }
 
     void (async () => {
+      let bootPhase = 'sceneRuntimeInit'
+
       try {
+        loadingTrace.emit('sceneRuntimeInitStarted')
+        const sceneRuntimeInitStartMs = performance.now()
+
         const runtime = await initSpiceSceneRuntime({
           isE2e,
           initialEt,
@@ -1372,6 +1394,11 @@ export function SceneCanvas() {
           selectedBodyIdRef,
           invalidate: three.invalidate,
           isDisposed: () => disposed,
+          trace: loadingTrace,
+        })
+
+        loadingTrace.emit('sceneRuntimeInitCompleted', {
+          durationMs: performance.now() - sceneRuntimeInitStartMs,
         })
 
         if (disposed) {
@@ -1389,23 +1416,50 @@ export function SceneCanvas() {
         updateSceneRef.current = runtime.updateScene
 
         // Initial render with current time store state
+        bootPhase = 'initialSceneUpdate'
+        loadingTrace.emit('sceneInitialUpdateStarted')
+        const initialUpdateStartMs = performance.now()
+
         const initialEtSec = timeStore.getState().etSec
         await runtime.updateScene({ etSec: initialEtSec, ...latestUiRef.current })
 
+        loadingTrace.emit('sceneInitialUpdateCompleted', {
+          durationMs: performance.now() - initialUpdateStartMs,
+        })
+
+        bootPhase = 'bootSnapshotLoad'
+        const bootPathname = window.location.pathname
+        const snapshotLoadStartMs = performance.now()
+        loadingTrace.emit('bootSnapshotLoadStarted', { pathname: bootPathname })
+
         await loadSnapshotFromPathnameAtBoot({
-          pathname: window.location.pathname,
+          pathname: bootPathname,
           applySnapshot: (snapshot) => applySceneSnapshotRef.current(snapshot),
           onInvalidPayload: ({ payload, errorCode, errorMessage }) => {
             console.warn('SceneCanvas: invalid /s/<payload> snapshot at boot; falling back to defaults', {
-              pathname: window.location.pathname,
+              pathname: bootPathname,
               payload,
               errorCode,
               errorMessage,
             })
+
+            loadingTrace.emit('bootSnapshotLoadInvalid', {
+              pathname: bootPathname,
+              errorCode,
+              errorMessage,
+            })
+
             setBootSnapshotNotice(INVALID_SNAPSHOT_NOTICE)
           },
         })
 
+        loadingTrace.emit('bootSnapshotLoadCompleted', {
+          pathname: bootPathname,
+          durationMs: performance.now() - snapshotLoadStartMs,
+        })
+
+        bootPhase = 'firstFrameRender'
+        loadingTrace.emit('rendererFirstFrameRequested')
         three.resize()
         three.controller.applyToCamera(three.camera)
         three.renderOnce()
@@ -1549,7 +1603,14 @@ export function SceneCanvas() {
 
         // Signals to Playwright tests that the WebGL scene has been rendered.
         markTspiceViewerRenderedScene({ isE2e })
+
+        loadingTrace.emit('bootCompleted', { isE2e })
       } catch (err) {
+        loadingTrace.emit('bootFailed', {
+          phase: bootPhase,
+          ...toLoadingTraceErrorMetadata(err),
+        })
+
         // Surface initialization failures to the console so e2e tests can catch them.
         if (!disposed) console.error(err)
       }

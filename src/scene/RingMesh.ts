@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 
+import type { BootLoadingTrace } from '../loading/bootLoadingTelemetry.js'
 import { isTextureCacheClearedError, loadTextureCached } from './loadTextureCached.js'
 
 export type CreateRingMeshOptions = {
@@ -29,6 +30,9 @@ export type CreateRingMeshOptions = {
    * visible without affecting ring textures that rely on alpha for gaps.
    */
   baseOpacity?: number
+
+  trace?: BootLoadingTrace
+  bodyId?: string
 }
 
 /** Create a textured ring mesh (with optional async texture loading + disposal helpers). */
@@ -66,11 +70,23 @@ export function createRingMesh(options: CreateRingMeshOptions): {
   geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
 
   let disposed = false
+  const trace = options.trace
+  const hasTexture = Boolean(options.textureUrl)
+
+  trace?.emit('ringAssetsInitStarted', {
+    bodyId: options.bodyId,
+    hasTexture,
+  })
 
   let map: THREE.Texture | undefined
   let mapRelease: (() => void) | undefined
-  const ready: Promise<void> = options.textureUrl
-    ? loadTextureCached(options.textureUrl, { colorSpace: THREE.SRGBColorSpace })
+  const readyBase: Promise<void> = options.textureUrl
+    ? loadTextureCached(options.textureUrl, {
+        colorSpace: THREE.SRGBColorSpace,
+        trace,
+        bodyId: options.bodyId,
+        assetKind: 'ringMap',
+      })
         .then(({ texture: tex, release }) => {
           if (disposed) {
             release()
@@ -90,6 +106,13 @@ export function createRingMesh(options: CreateRingMeshOptions): {
           console.warn('Failed to load ring texture', options.textureUrl, err)
         })
     : Promise.resolve()
+
+  const ready = readyBase.finally(() => {
+    trace?.emit('ringAssetsInitCompleted', {
+      bodyId: options.bodyId,
+      hasTexture,
+    })
+  })
 
   const material = new THREE.MeshStandardMaterial({
     color: new THREE.Color(options.color ?? '#ffffff'),
