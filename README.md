@@ -1,6 +1,6 @@
 # Orrery
 
-Minimal Vite + React + TypeScript app that renders a solar system visualization using real NAIF (NASA’s Navigation and Ancillary Information Facility) space geometry.
+Minimal Vite + React + TypeScript app that renders a solar system visualization using real space geometry data from NAIF (NASA’s Navigation and Ancillary Information Facility).
 
 [Live Demo](https://orrery.ryboso.me)
 
