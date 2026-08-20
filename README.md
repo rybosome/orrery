@@ -1,10 +1,10 @@
 # Orrery
 
-Minimal Vite + React + TypeScript app that renders a basic Three.js scene using an imperative `canvas` setup.
-
-This standalone app is a renderer / Three.js viewer for tspice.
+Minimal Vite + React + TypeScript app that renders a solar system visualization using real NAIF (NASA’s Navigation and Ancillary Information Facility) space geometry.
 
 [Live Demo](https://orrery.ryboso.me)
+
+![orrery screenshot](public/orrery-earth-lighting.png)
 
 ## Development
 
