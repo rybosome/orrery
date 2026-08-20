@@ -1,8 +1,10 @@
 # Orrery
 
-Minimal Vite + React + TypeScript app that renders a basic Three.js scene using an imperative `canvas` setup (no `@react-three/fiber`).
+Minimal Vite + React + TypeScript app that renders a basic Three.js scene using an imperative `canvas` setup.
 
 This standalone app is a renderer / Three.js viewer for tspice.
+
+[Live Demo](https://orrery.ryboso.me)
 
 ## Development
 
@@ -39,15 +41,12 @@ From repo root:
 ### Frames / world space
 
 - Canonical world (inertial) frame: `J2000`.
-- `x/y/z` axis mapping is **1:1** with Three.js world axes.
 - Handedness: follow SPICE conventions for the requested frame (for `J2000`, treat it as a right-handed inertial frame).
 
 ### Time
 
 - `et` is **ephemeris time** in **seconds past the J2000 epoch**.
 - In this codebase we represent it as a plain `number` (`EtSeconds`).
-
-> Note: The exact J2000 epoch in SPICE is `2000-01-01 12:00:00 TT`.
 
 ### Units
 
@@ -59,53 +58,18 @@ From repo root:
 
 SPICE scales are huge for typical WebGL scenes.
 
-A reasonable starting point is:
-
-- `1 threeUnit = 1,000 km` (`kmToWorld = 1 / 1000`)
-
-The current demo scene (`src/SceneCanvas.tsx`) uses a more aggressive scale:
-
 - `1 threeUnit = 1,000,000 km` (`kmToWorld = 1 / 1_000_000`)
-
-…and then applies a per-body visual `radiusScale` so planets are still visible.
 
 Tune this depending on camera near/far planes, desired look, and precision.
 
-## Precision strategy (Issue #68)
-
-This viewer implements **Strategy A — focus-origin rebasing ("floating origin")**.
+## Precision strategy
 
 WebGL vertices end up in 32-bit float space; solar-system-scale positions (e.g. 1 AU in km) lose fine detail when used directly as world coordinates.
 
-Implementation in `src/scene/precision.ts` + `src/SceneCanvas.tsx`:
-
 - Query body positions in a stable inertial frame (`J2000`) relative to a stable observer (we use `SUN`).
 - Pick a **focus target** (defaults to Earth).
-- Each update, compute `rebasedKm = bodyPosKm - focusPosKm`.
-- Convert `rebasedKm` into renderer units via `kmToWorld` and assign to Three.js object positions.
-
-This keeps the camera and nearby bodies numerically close to the origin, improving effective precision.
-
-### Debug/e2e query params (retained)
-
-Scene sharing/state restoration should use canonical snapshot paths (`/<payload>`) (legacy `/s/<payload>` still loads during compatibility). Query params are intentionally limited to explicit debug/e2e startup flags:
-
-- `?logDepth=1` (or presence): opt-in to Three's logarithmic depth buffer.
-  - This is **not** the primary precision strategy (it helps with depth range / z-fighting more than large-coordinate jitter), but it can be useful when experimenting with bigger far planes.
-- `?e2e=1` (or presence): enable deterministic e2e mode.
-- `?et=<number>`: e2e-only initial ET override.
-- `?sunPostprocessMode=off|wholeFrame|sunIsolated`: e2e-only boot override for postprocess mode.
-- `?sunToneMap=none|filmic|acesLike`: e2e-only boot override for tonemap selection.
-
-## Viewer controls
-
-In local dev (non-e2e), the viewer exposes a tiny overlay:
-
-- ET slider + play/pause
-- focus target selection (Sun/Earth/Moon)
-- optional debug axes:
-  - `J2000` axes at the origin
-  - body-fixed axes at each body (Earth: `IAU_EARTH`, Moon: `IAU_MOON`)
+- Each update, compute delta between body and focus position.
+- Convert delta into renderer units and assign to Three.js object positions.
 
 ### Frame transforms
 
@@ -123,13 +87,6 @@ In local dev (non-e2e), the viewer exposes a tiny overlay:
 The transform is intended to be applied as:
 
 - `v_to = M(from->to) * v_from`
-
-## What’s included
-
-- `src/spice/SpiceClient.ts`: a minimal renderer-facing interface
-- `src/spice/createSpiceClient.ts`: viewer integration layer (WASM backend + default NAIF kernels)
-- `src/spice/createCachedSpiceClient.ts`: single-entry (`et`-keyed) cache wrapper for viewer perf
-- `src/scene/SceneModel.ts`: types describing bodies and render styling
 
 ## Visual regression testing
 
