@@ -24,6 +24,7 @@ import {
   HOME_PRESET_KEYS,
   type HomePresetKey,
 } from './interaction/homePresets.js'
+import { SOLAR_SCALE_CAMERA_STATE } from './interaction/scalePresets.js'
 import { RenderHud, type RenderHudStats } from './renderer/RenderHud.js'
 import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRuntime.js'
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
@@ -395,6 +396,7 @@ export function SceneCanvas() {
   // Uses a log-scale slider so the range can go "absurdly" large without being fiddly.
   // This is ephemeral (not persisted) and only affects rendered radii.
   const [planetScaleSlider, setPlanetScaleSlider] = useState(0)
+  const [scalePreset, setScalePreset] = useState<'planetary' | 'solar'>('planetary')
 
   const PLANET_SCALE_MAX = 800
   const PLANET_SCALE_SLIDER_MAX = Math.round(20 * Math.log10(PLANET_SCALE_MAX))
@@ -632,6 +634,7 @@ export function SceneCanvas() {
 
   const applyScalePreset = useCallback(
     (preset: 'planetary' | 'solar') => {
+      setScalePreset(preset)
       cancelFocusTweenRef.current?.()
 
       const controller = controllerRef.current
@@ -675,20 +678,16 @@ export function SceneCanvas() {
       if (preset === 'solar') {
         // Solar scale is intended for AU-scale viewing, so:
         // - focus the Sun (center the scene)
-        // - zoom out to a reasonable baseline distance (~80% on the zoom slider)
+        // - restore the requested world-space camera pose
         if (String(focusBodyRef.current) !== 'SUN') {
           // `initSpiceSceneRuntime.updateScene` will normally auto-zoom (and/or
           // apply a home preset) whenever focus changes. For the Solar scale
-          // preset we explicitly choose a zoom baseline, so skip that behavior
+          // preset we explicitly choose a camera pose, so skip that behavior
           // once for this focus change.
           skipAutoZoomForNextFocusBodyRef.current = 'SUN'
         }
         setFocusBody('SUN')
-        controller.radius = THREE.MathUtils.clamp(
-          radiusForZoomSlider(80, controller.minRadius, controller.maxRadius),
-          controller.minRadius,
-          controller.maxRadius,
-        )
+        controller.restore(SOLAR_SCALE_CAMERA_STATE)
       }
 
       // Keep slider UI in-sync immediately (no need to wait for the overlay polling interval).
@@ -697,7 +696,7 @@ export function SceneCanvas() {
       controller.applyToCamera(camera)
       invalidateRef.current?.()
     },
-    [planetScaleSliderForMultiplier, radiusForZoomSlider, zoomSliderForRadius],
+    [planetScaleSliderForMultiplier, zoomSliderForRadius],
   )
 
   // Enable keyboard controls (disabled in e2e mode)
@@ -1727,16 +1726,18 @@ export function SceneCanvas() {
                         </span>
                         <div style={{ flex: 1, display: 'flex', gap: 6 }}>
                           <button
-                            className="advancedTab"
+                            className={`advancedTab ${scalePreset === 'planetary' ? 'advancedTabActive' : ''}`}
                             type="button"
+                            aria-pressed={scalePreset === 'planetary'}
                             onClick={() => applyScalePreset('planetary')}
                             title="Planetary scale preset"
                           >
                             planetary
                           </button>
                           <button
-                            className="advancedTab"
+                            className={`advancedTab ${scalePreset === 'solar' ? 'advancedTabActive' : ''}`}
                             type="button"
+                            aria-pressed={scalePreset === 'solar'}
                             onClick={() => applyScalePreset('solar')}
                             title="Solar scale preset"
                           >
