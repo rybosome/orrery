@@ -3,7 +3,8 @@
  *
  * The zoom UI is a log-scale curve mapped onto a slider in [0..100].
  * The first third of that curve should default to 1 hour/s,
- * the next third to 1 day/s, and the final third to 1 week/s.
+ * and the remaining two thirds to 1 day/s. The weekly rate remains available
+ * as an explicit playback rate in the time store.
  */
 
 export const DEFAULT_RESUME_RATE_HOUR_SEC_PER_SEC = 60 * 60
@@ -24,8 +25,8 @@ export function computeDefaultResumeRateSecPerSecForZoomSlider(zoomSlider: numbe
   // Inclusivity:
   //   [0 .. 100/3)       => 1 hour/s
   //   [100/3 .. 2*100/3) => 1 day/s
-  //   [2*100/3 .. 100]   => 1 week/s
+  //   [2*100/3 .. 100]   => 1 day/s
   if (z < ZOOM_SLIDER_ONE_THIRD) return DEFAULT_RESUME_RATE_HOUR_SEC_PER_SEC
   if (z < ZOOM_SLIDER_TWO_THIRDS) return DEFAULT_RESUME_RATE_DAY_SEC_PER_SEC
-  return DEFAULT_RESUME_RATE_WEEK_SEC_PER_SEC
+  return DEFAULT_RESUME_RATE_DAY_SEC_PER_SEC
 }

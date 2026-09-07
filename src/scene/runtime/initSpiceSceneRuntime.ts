@@ -436,10 +436,9 @@ export async function initSpiceSceneRuntime(args: {
 
       if (shouldSkipAutoZoomForFocusBody) {
         cancelFocusTween?.()
-        resetLookOffset?.()
 
-        // Keep the caller-selected zoom, but force the camera to look at the
-        // rebased origin for the new focus body.
+        // Keep the caller-selected camera state, including free-look offsets,
+        // but force the camera target to the rebased origin for the new focus body.
         focusOn?.(new THREE.Vector3(0, 0, 0), {
           radius: controller.radius,
           immediate: true,
