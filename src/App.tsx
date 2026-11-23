@@ -1,18 +1,32 @@
 import './App.css'
 import { SceneCanvas } from './SceneCanvas'
-import { DEFAULT_SCENE } from './scenes/sceneCatalog.js'
+import { buildScenePath, resolveSceneRoute } from './scenes/sceneRoute.js'
 import { createSolTestScene } from './e2eHooks/solTestScene.js'
 
 const query = new URLSearchParams(window.location.search)
-const scene = import.meta.env.DEV && query.has('e2e') && query.has('testScene') ? createSolTestScene() : DEFAULT_SCENE
+const route = resolveSceneRoute(window.location.pathname, import.meta.env.BASE_URL)
+const useTestScene = import.meta.env.DEV && query.has('e2e') && query.has('testScene')
 
 function App() {
+  const scene = route.kind === 'scene' ? (useTestScene ? createSolTestScene() : route.scene) : null
   return (
     <div className="app">
       {/* Visually-hidden heading for e2e smoke + accessibility. */}
       <h1 className="sr-only">Orrery</h1>
       <main className="main">
-        <SceneCanvas key={scene.id} definition={scene} />
+        {scene && route.kind === 'scene' ? (
+          <SceneCanvas
+            key={scene.id}
+            definition={scene}
+            snapshot={route.snapshot}
+            invalidSnapshot={route.invalidSnapshot}
+          />
+        ) : (
+          <section className="sceneRouteError">
+            <h2>Unknown scene</h2>
+            <a href={buildScenePath('sol', import.meta.env.BASE_URL)}>Open the Solar System</a>
+          </section>
+        )}
       </main>
     </div>
   )

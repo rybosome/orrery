@@ -4,18 +4,12 @@ import { SCENE_SNAPSHOT_SCHEMA_VERSION, normalizeSceneSnapshot, type SceneSnapsh
 
 type SnapshotDecodeErrorCode = 'invalid_payload' | 'decompression_failed' | 'invalid_json' | 'unsupported_version'
 
-export type SceneSnapshotDecodeResult =
-  | {
-      ok: true
-      snapshot: SceneSnapshotV1
-    }
-  | {
-      ok: false
-      error: {
-        code: SnapshotDecodeErrorCode
-        message: string
-      }
-    }
+type DecodeFailure = {
+  ok: false
+  error: { code: SnapshotDecodeErrorCode; message: string }
+}
+
+export type SceneSnapshotDecodeResult = { ok: true; snapshot: SceneSnapshotV1 } | DecodeFailure
 
 const SNAPSHOT_DEFLATE_LEVEL = 9
 
@@ -70,16 +64,21 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 /** Encode a snapshot into a deterministic compressed base64url payload. */
 export function encodeSnapshot(snapshot: SceneSnapshotV1): string {
-  const normalized = normalizeSceneSnapshot(snapshot)
-  const json = JSON.stringify(normalized)
+  return encodeSnapshotDocument(normalizeSceneSnapshot(snapshot))
+}
+
+/** Compress a versioned snapshot document into its URL-safe representation. */
+export function encodeSnapshotDocument(document: object): string {
+  const json = JSON.stringify(document)
   const compressed = deflateSync(new TextEncoder().encode(json), { level: SNAPSHOT_DEFLATE_LEVEL })
   return encodeBase64Url(compressed)
 }
 
-/** Decode and validate a compressed snapshot payload. */
-export function decodeSnapshot(payload: string): SceneSnapshotDecodeResult {
+/** Decode the shared wire format before validating a specific snapshot version. */
+export function decodeSnapshotDocument(payload: string): { ok: true; document: unknown } | DecodeFailure {
   let compressed: Uint8Array
   try {
+    if (payload.length > 16_384) throw new Error('snapshot payload is too long')
     compressed = decodeBase64Url(payload)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'invalid snapshot payload'
@@ -94,7 +93,9 @@ export function decodeSnapshot(payload: string): SceneSnapshotDecodeResult {
 
   let jsonBytes: Uint8Array
   try {
-    jsonBytes = inflateSync(compressed)
+    const out = new Uint8Array(32_768)
+    jsonBytes = inflateSync(compressed, { out })
+    if (jsonBytes.length === out.length) throw new Error('snapshot document is too large')
   } catch {
     return {
       ok: false,
@@ -118,7 +119,14 @@ export function decodeSnapshot(payload: string): SceneSnapshotDecodeResult {
     }
   }
 
-  const parsedRecord = asRecord(parsed)
+  return { ok: true, document: parsed }
+}
+
+/** Decode and validate a compressed v1 snapshot payload with the original defaults. */
+export function decodeSnapshot(payload: string): SceneSnapshotDecodeResult {
+  const decoded = decodeSnapshotDocument(payload)
+  if (!decoded.ok) return decoded
+  const parsedRecord = asRecord(decoded.document)
   if (!parsedRecord || parsedRecord.v !== SCENE_SNAPSHOT_SCHEMA_VERSION) {
     return {
       ok: false,

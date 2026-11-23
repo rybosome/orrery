@@ -34,7 +34,7 @@ describe('snapshot redirect rules', () => {
     expect(rules).toEqual([
       { from: '/static/*', to: '/static/:splat', status: '200' },
       { from: '/s/*', to: '/', status: '200' },
-      { from: '/:payload', to: '/', status: '200' },
+      { from: '/:scene/s/:payload', to: '/', status: '200' },
     ])
   })
 })

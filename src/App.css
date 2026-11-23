@@ -1642,3 +1642,13 @@
 .sceneOverlayToggle {
   order: -1;
 }
+
+.sceneRouteError {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+}
+
+.sceneRouteError a {
+  color: inherit;
+}

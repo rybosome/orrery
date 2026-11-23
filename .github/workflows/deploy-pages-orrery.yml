@@ -22,6 +22,7 @@ on:
       - ".github/workflows/reusable-node-pnpm.yml"
       - ".github/actions/setup-pnpm-node/**"
       - "scripts/read-pnpm-version.cjs"
+      - "scripts/check-hosted-routes.mjs"
 
 jobs:
   deploy-production:
@@ -213,6 +214,9 @@ jobs:
             pages deploy dist
             --project-name "${{ env.PAGES_PROJECT }}"
             --branch "${{ env.PREVIEW_BRANCH }}"
+
+      - name: Verify public preview routes and assets
+        run: node scripts/check-hosted-routes.mjs "$PREVIEW_URL"
 
       - name: Find existing orrery preview comment
         id: find_preview_comment

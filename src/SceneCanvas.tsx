@@ -21,15 +21,17 @@ import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRun
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
 import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/initSpiceSceneRuntime.js'
 import type { SceneDefinition } from './scenes/sceneDefinition.js'
-import { applySnapshot, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
-import { resolveSolV1Focus } from './snapshot/solV1Focus.js'
-import { loadSnapshotFromPathnameAtBoot } from './snapshot/sceneSnapshotBoot.js'
+import { applySnapshotView, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
 import {
   buildSnapshotShareUrlForLocation,
   INITIAL_SNAPSHOT_SHARE_STATE,
   reduceSnapshotShareState,
 } from './snapshot/sceneSnapshotShare.js'
-import { snapshotCameraToControllerState, type SceneSnapshotV1 } from './snapshot/sceneSnapshot.js'
+import {
+  snapshotCameraToControllerState,
+  type SceneSnapshotRestore,
+  type SceneSnapshotV1,
+} from './snapshot/sceneSnapshot.js'
 
 type AdvancedPaneId = 'time' | 'scale' | 'guides' | 'orbits' | 'system' | 'rendering'
 
@@ -239,7 +241,7 @@ function AdvancedHelpButton({
 
 type SceneSnapshotBindings = {
   captureSnapshot: () => SceneSnapshotV1 | null
-  applySnapshot: (snapshot: SceneSnapshotV1) => Promise<SceneSnapshotV1>
+  applySnapshot: (snapshot: SceneSnapshotRestore) => Promise<SceneSnapshotRestore>
 }
 
 const INVALID_SNAPSHOT_NOTICE = 'Invalid shared snapshot URL. Loaded default scene state instead.'
@@ -247,7 +249,15 @@ const INVALID_SNAPSHOT_NOTICE = 'Invalid shared snapshot URL. Loaded default sce
 /**
  * Main Three.js scene canvas + runtime initializer for the orrery app.
  */
-export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
+export function SceneCanvas({
+  definition,
+  snapshot,
+  invalidSnapshot,
+}: {
+  definition: SceneDefinition
+  snapshot?: SceneSnapshotRestore
+  invalidSnapshot?: boolean
+}) {
   const bodiesById = useMemo(() => new Map(definition.bodies.map((body) => [body.id, body])), [definition])
   const starId = definition.primaryLight.bodyId
   const [timeStore] = useState(() => createTimeStore(definition.time))
@@ -267,7 +277,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
   const rendererRuntimeRef = useRef<ThreeRuntime | null>(null)
   const sceneSnapshotBindingsRef = useRef<SceneSnapshotBindings | null>(null)
-  const applySceneSnapshotRef = useRef<(snapshot: SceneSnapshotV1) => Promise<SceneSnapshotV1>>(
+  const applySceneSnapshotRef = useRef<(snapshot: SceneSnapshotRestore) => Promise<SceneSnapshotRestore>>(
     async (snapshot) => snapshot,
   )
 
@@ -295,7 +305,9 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   // Selected body (promoted from local closure variable for inspector panel)
   const [selectedBody, setSelectedBody] = useState<string | null>(null)
   const [spiceClient, setSpiceClient] = useState<SpiceAsync | null>(null)
-  const [bootSnapshotNotice, setBootSnapshotNotice] = useState<string | null>(null)
+  const [bootSnapshotNotice, setBootSnapshotNotice] = useState<string | null>(
+    invalidSnapshot ? INVALID_SNAPSHOT_NOTICE : null,
+  )
 
   // Sun postprocess tuning (ephemeral; adjustable live via the RENDERING pane).
   const [sunPostprocessExposure, setSunPostprocessExposure] = useState(sunExposure)
@@ -415,6 +427,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   // runtime config it needs without having to re-run on UI toggles.
   const initRuntimeConfigRef = useRef({
     definition,
+    snapshot,
     isE2e,
     enableLogDepth,
     starSeed,
@@ -920,114 +933,109 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   }, [snapshotShareState.generatedUrl])
 
   const applySceneSnapshot = useCallback(
-    async (snapshot: SceneSnapshotV1): Promise<SceneSnapshotV1> => {
+    async (snapshot: SceneSnapshotRestore): Promise<SceneSnapshotRestore> => {
       const controller = controllerRef.current
       const camera = cameraRef.current
       if (!controller || !camera) return snapshot
 
-      const legacyFocus = definition.id === 'sol' ? resolveSolV1Focus(snapshot.focusBody) : undefined
-      const focusId = legacyFocus && bodiesById.has(legacyFocus) ? legacyFocus : definition.viewer.initialFocusId
-      return applySnapshot(
-        { ...snapshot, focusBody: focusId },
-        {
-          cancelFocusTween: () => cancelFocusTweenRef.current?.(),
-          setSkipAutoZoomForFocusBody: (nextFocusBody) => {
-            // Keep this one-shot token tightly scoped to real focus changes.
-            // If snapshot focus already matches current focus, don't arm a skip
-            // token that may never be consumed by updateScene.
-            skipAutoZoomForNextFocusBodyRef.current =
-              nextFocusBody != null && String(nextFocusBody) !== focusBodyRef.current ? String(nextFocusBody) : null
-          },
-
-          applyScale: (next) => {
-            setCameraFovDeg(next.cameraFovDeg)
-            setSunScaleMultiplier(next.sunScaleMultiplier)
-            setPlanetScaleSlider(planetScaleSliderForMultiplier(next.planetScaleMultiplier))
-          },
-
-          applyGuides: (next) => {
-            setShowJ2000Axes(next.showJ2000Axes)
-            setShowBodyFixedAxes(next.showBodyFixedAxes)
-            setLabelsEnabled(next.labelsEnabled)
-            setLabelOcclusionEnabled(next.labelOcclusionEnabled)
-          },
-
-          applyOrbitPaths: (next) => {
-            setOrbitPathsEnabled(next.enabled)
-            setOrbitLineWidthPx(next.lineWidthPx)
-            setOrbitSamplesPerOrbit(next.samplesPerOrbit)
-            setOrbitMaxTotalPoints(next.maxTotalPoints)
-          },
-
-          applySystem: (next) => {
-            setAnimatedSky(next.animatedSky)
-            setSkyTwinkle(next.skyTwinkle)
-            setShowRenderHud(next.showRenderHud)
-          },
-
-          applyRendering: (next) => {
-            setAmbientLightIntensity(next.ambientLightIntensity)
-            setSunLightIntensity(next.sunLightIntensity)
-            setSunEmissiveIntensity(next.sunEmissiveIntensity)
-            setSunEmissiveColor(next.sunEmissiveColor)
-
-            setSunPostprocessExposure(next.sunPostprocessExposure)
-            setSunPostprocessToneMap(next.sunPostprocessToneMap)
-            setSunPostprocessBloomThreshold(next.sunPostprocessBloomThreshold)
-            setSunPostprocessBloomStrength(next.sunPostprocessBloomStrength)
-            setSunPostprocessBloomRadius(next.sunPostprocessBloomRadius)
-            setSunPostprocessBloomResolutionScale(next.sunPostprocessBloomResolutionScale)
-          },
-
-          applyFocusBody: (nextFocusBody) => {
-            setFocusBody(String(nextFocusBody))
-          },
-
-          applyPlayer: (next) => {
-            timeStore.restoreTime(next)
-          },
-
-          flushSceneUpdate: async (next) => {
-            const update = updateSceneRef.current
-            if (!update) return
-
-            await update(
-              {
-                etSec: timeStore.getState().etSec,
-                focusBody: String(next.focusBody),
-                showJ2000Axes: next.guides.showJ2000Axes,
-                showBodyFixedAxes: next.guides.showBodyFixedAxes,
-                cameraFovDeg: next.scale.cameraFovDeg,
-                sunScaleMultiplier: next.scale.sunScaleMultiplier,
-                planetScaleMultiplier: next.scale.planetScaleMultiplier,
-
-                orbitLineWidthPx: next.orbitPaths.lineWidthPx,
-                orbitSamplesPerOrbit: next.orbitPaths.samplesPerOrbit,
-                orbitMaxTotalPoints: next.orbitPaths.maxTotalPoints,
-                orbitPathsEnabled: next.orbitPaths.enabled,
-                labelsEnabled: next.guides.labelsEnabled,
-                labelOcclusionEnabled: next.guides.labelOcclusionEnabled,
-
-                ambientLightIntensity: next.rendering.ambientLightIntensity,
-                sunLightIntensity: next.rendering.sunLightIntensity,
-                sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
-                sunEmissiveColor: next.rendering.sunEmissiveColor,
-              },
-              { required: !sceneReadyRef.current },
-            )
-          },
-
-          applyCamera: (nextCamera) => {
-            if (controllerRef.current !== controller) return
-            controller.restore(snapshotCameraToControllerState(nextCamera))
-            controller.applyToCamera(camera)
-            setZoomSlider(zoomSliderForRadius(controller.radius, controller.minRadius, controller.maxRadius))
-            invalidateRef.current?.()
-          },
+      return applySnapshotView(snapshot, {
+        cancelFocusTween: () => cancelFocusTweenRef.current?.(),
+        setSkipAutoZoomForFocusBody: (nextFocusBody) => {
+          // Keep this one-shot token tightly scoped to real focus changes.
+          // If snapshot focus already matches current focus, don't arm a skip
+          // token that may never be consumed by updateScene.
+          skipAutoZoomForNextFocusBodyRef.current =
+            nextFocusBody != null && String(nextFocusBody) !== focusBodyRef.current ? String(nextFocusBody) : null
         },
-      )
+
+        applyScale: (next) => {
+          setCameraFovDeg(next.cameraFovDeg)
+          setSunScaleMultiplier(next.sunScaleMultiplier)
+          setPlanetScaleSlider(planetScaleSliderForMultiplier(next.planetScaleMultiplier))
+        },
+
+        applyGuides: (next) => {
+          setShowJ2000Axes(next.showJ2000Axes)
+          setShowBodyFixedAxes(next.showBodyFixedAxes)
+          setLabelsEnabled(next.labelsEnabled)
+          setLabelOcclusionEnabled(next.labelOcclusionEnabled)
+        },
+
+        applyOrbitPaths: (next) => {
+          setOrbitPathsEnabled(next.enabled)
+          setOrbitLineWidthPx(next.lineWidthPx)
+          setOrbitSamplesPerOrbit(next.samplesPerOrbit)
+          setOrbitMaxTotalPoints(next.maxTotalPoints)
+        },
+
+        applySystem: (next) => {
+          setAnimatedSky(next.animatedSky)
+          setSkyTwinkle(next.skyTwinkle)
+          setShowRenderHud(next.showRenderHud)
+        },
+
+        applyRendering: (next) => {
+          setAmbientLightIntensity(next.ambientLightIntensity)
+          setSunLightIntensity(next.sunLightIntensity)
+          setSunEmissiveIntensity(next.sunEmissiveIntensity)
+          setSunEmissiveColor(next.sunEmissiveColor)
+
+          setSunPostprocessExposure(next.sunPostprocessExposure)
+          setSunPostprocessToneMap(next.sunPostprocessToneMap)
+          setSunPostprocessBloomThreshold(next.sunPostprocessBloomThreshold)
+          setSunPostprocessBloomStrength(next.sunPostprocessBloomStrength)
+          setSunPostprocessBloomRadius(next.sunPostprocessBloomRadius)
+          setSunPostprocessBloomResolutionScale(next.sunPostprocessBloomResolutionScale)
+        },
+
+        applyFocusBody: (nextFocusBody) => {
+          setFocusBody(String(nextFocusBody))
+        },
+
+        applyPlayer: (next) => {
+          timeStore.restoreTime(next)
+        },
+
+        flushSceneUpdate: async (next) => {
+          const update = updateSceneRef.current
+          if (!update) return
+
+          await update(
+            {
+              etSec: timeStore.getState().etSec,
+              focusBody: String(next.focusBody),
+              showJ2000Axes: next.guides.showJ2000Axes,
+              showBodyFixedAxes: next.guides.showBodyFixedAxes,
+              cameraFovDeg: next.scale.cameraFovDeg,
+              sunScaleMultiplier: next.scale.sunScaleMultiplier,
+              planetScaleMultiplier: next.scale.planetScaleMultiplier,
+
+              orbitLineWidthPx: next.orbitPaths.lineWidthPx,
+              orbitSamplesPerOrbit: next.orbitPaths.samplesPerOrbit,
+              orbitMaxTotalPoints: next.orbitPaths.maxTotalPoints,
+              orbitPathsEnabled: next.orbitPaths.enabled,
+              labelsEnabled: next.guides.labelsEnabled,
+              labelOcclusionEnabled: next.guides.labelOcclusionEnabled,
+
+              ambientLightIntensity: next.rendering.ambientLightIntensity,
+              sunLightIntensity: next.rendering.sunLightIntensity,
+              sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
+              sunEmissiveColor: next.rendering.sunEmissiveColor,
+            },
+            { required: !sceneReadyRef.current },
+          )
+        },
+
+        applyCamera: (nextCamera) => {
+          if (controllerRef.current !== controller) return
+          controller.restore(snapshotCameraToControllerState(nextCamera))
+          controller.applyToCamera(camera)
+          setZoomSlider(zoomSliderForRadius(controller.radius, controller.minRadius, controller.maxRadius))
+          invalidateRef.current?.()
+        },
+      })
     },
-    [timeStore, definition, bodiesById, planetScaleSliderForMultiplier, zoomSliderForRadius],
+    [timeStore, planetScaleSliderForMultiplier, zoomSliderForRadius],
   )
 
   applySceneSnapshotRef.current = applySceneSnapshot
@@ -1301,26 +1309,13 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
         updateSceneRef.current = runtime.updateScene
 
-        const snapshotResult = await loadSnapshotFromPathnameAtBoot({
-          pathname: window.location.pathname,
-          applySnapshot: (snapshot) => applySceneSnapshotRef.current(snapshot),
-          onInvalidPayload: ({ payload, errorCode, errorMessage }) => {
-            if (signal.aborted) return
-            console.warn('SceneCanvas: invalid snapshot path payload at boot; falling back to defaults', {
-              pathname: window.location.pathname,
-              payload,
-              errorCode,
-              errorMessage,
-            })
-            setBootSnapshotNotice(INVALID_SNAPSHOT_NOTICE)
-          },
-        })
-
-        signal.throwIfAborted()
-        if (snapshotResult.status !== 'applied') {
+        const bootSnapshot = initRuntimeConfigRef.current.snapshot
+        if (bootSnapshot) {
+          await applySceneSnapshotRef.current(bootSnapshot)
+        } else {
           await runtime.updateScene({ etSec: timeStore.getState().etSec, ...latestUiRef.current }, { required: true })
-          signal.throwIfAborted()
         }
+        signal.throwIfAborted()
 
         three.resize()
         three.controller.applyToCamera(three.camera)

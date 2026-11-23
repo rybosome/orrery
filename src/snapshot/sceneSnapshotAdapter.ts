@@ -14,6 +14,7 @@ import {
   type SceneSnapshotScaleOptionsV1,
   type SceneSnapshotSystemOptionsV1,
   type SceneSnapshotV1,
+  type SceneSnapshotView,
 } from './sceneSnapshot.js'
 
 export type SceneSnapshotCaptureInput = {
@@ -26,6 +27,8 @@ export type SceneSnapshotCaptureInput = {
   system: SceneSnapshotSystemOptionsV1
   rendering: SceneSnapshotRenderingOptionsV1
 }
+
+type SnapshotForApply = SceneSnapshotView & { focusBody: BodyRef }
 
 export type SceneSnapshotApplyInput = {
   cancelFocusTween: () => void
@@ -46,7 +49,7 @@ export type SceneSnapshotApplyInput = {
    * If provided, this runs after focus/player/UI state has been queued and before
    * camera restore, which helps avoid focus/camera/time stomping.
    */
-  flushSceneUpdate?: (snapshot: SceneSnapshotV1) => void | Promise<void>
+  flushSceneUpdate?: (snapshot: SnapshotForApply) => void | Promise<void>
 
   applyCamera: (next: SceneSnapshotCameraV1) => void
 }
@@ -94,8 +97,14 @@ export async function applySnapshot(
   snapshotInput: SceneSnapshotV1,
   input: SceneSnapshotApplyInput,
 ): Promise<SceneSnapshotV1> {
-  const snapshot = normalizeSceneSnapshot(snapshotInput)
+  return applySnapshotView(normalizeSceneSnapshot(snapshotInput), input)
+}
 
+/** Apply an already-validated view without interpreting its wire format. */
+export async function applySnapshotView<T extends SnapshotForApply>(
+  snapshot: T,
+  input: SceneSnapshotApplyInput,
+): Promise<T> {
   input.cancelFocusTween()
   input.setSkipAutoZoomForFocusBody(snapshot.focusBody)
 
