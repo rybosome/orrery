@@ -1337,6 +1337,33 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       }
     }
 
+    const disposeSession = () => {
+      if (signal.aborted) return
+      sceneReadyRef.current = false
+      session.abort()
+
+      spiceSceneRuntime?.dispose()
+      spiceSceneRuntime = null
+
+      interactions?.dispose()
+      interactions = null
+
+      three.dispose()
+      rendererRuntimeRef.current = null
+
+      controllerRef.current = null
+      cameraRef.current = null
+      sceneRef.current = null
+      rendererRef.current = null
+      invalidateRef.current = null
+      renderOnceRef.current = null
+      cancelFocusTweenRef.current = null
+      focusOnOriginRef.current = null
+      resetLookOffsetRef.current = null
+
+      updateSceneRef.current = null
+    }
+
     void (async () => {
       try {
         const runtime = await initSpiceSceneRuntime({
@@ -1547,32 +1574,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       }
     })()
 
-    const disposeSession = () => {
-      if (signal.aborted) return
-      sceneReadyRef.current = false
-      session.abort()
-
-      spiceSceneRuntime?.dispose()
-      spiceSceneRuntime = null
-
-      interactions?.dispose()
-      interactions = null
-
-      three.dispose()
-      rendererRuntimeRef.current = null
-
-      controllerRef.current = null
-      cameraRef.current = null
-      sceneRef.current = null
-      rendererRef.current = null
-      invalidateRef.current = null
-      renderOnceRef.current = null
-      cancelFocusTweenRef.current = null
-      focusOnOriginRef.current = null
-      resetLookOffsetRef.current = null
-
-      updateSceneRef.current = null
-    }
     return disposeSession
   }, [timeStore])
 
