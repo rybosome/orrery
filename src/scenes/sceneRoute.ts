@@ -28,7 +28,11 @@ export function canonicalHomePath(pathname: string, base: string): string | unde
 function readLegacyView(payload: string): SceneSnapshotRestore | undefined {
   const decoded = decodeSnapshot(payload)
   if (!decoded.ok) return undefined
-  const focusBody = resolveSolV1Focus(decoded.snapshot.focusBody) ?? DEFAULT_SCENE.viewer.initialFocusId
+  const legacyFocus = resolveSolV1Focus(decoded.snapshot.focusBody)
+  const focusBody =
+    legacyFocus && DEFAULT_SCENE.bodies.some((body) => body.id === legacyFocus)
+      ? legacyFocus
+      : DEFAULT_SCENE.viewer.initialFocusId
   return { ...decoded.snapshot, focusBody }
 }
 

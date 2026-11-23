@@ -24,10 +24,3 @@ export type Vec3Km = Vec3
 
 /** 3x3 rotation matrix in **column-major** order (Three.js compatible). */
 export type Mat3 = Mat3ColMajor
-
-/**
- * Placeholder for viewer-specific optional kernel packs (moons, spacecraft, etc).
- *
- * (Kernel loading is currently handled via shared `kernels.naif` helpers.)
- */
-export type KernelPackId = string

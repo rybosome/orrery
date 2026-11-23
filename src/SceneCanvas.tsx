@@ -236,11 +236,6 @@ function AdvancedHelpButton({
   )
 }
 
-type SceneSnapshotBindings = {
-  captureSnapshot: () => SceneSnapshotV2 | null
-  applySnapshot: (snapshot: SceneSnapshotRestore) => Promise<SceneSnapshotRestore>
-}
-
 const INVALID_SNAPSHOT_NOTICE = 'Invalid shared snapshot URL. Loaded default scene state instead.'
 
 /**
@@ -273,10 +268,6 @@ export function SceneCanvas({
   const cancelFocusTweenRef = useRef<(() => void) | null>(null)
 
   const rendererRuntimeRef = useRef<ThreeRuntime | null>(null)
-  const sceneSnapshotBindingsRef = useRef<SceneSnapshotBindings | null>(null)
-  const applySceneSnapshotRef = useRef<(snapshot: SceneSnapshotRestore) => Promise<SceneSnapshotRestore>>(
-    async (snapshot) => snapshot,
-  )
 
   const runtimeConfig = useMemo(() => parseSceneCanvasRuntimeConfigFromLocationSearch(window.location.search), [])
 
@@ -899,15 +890,12 @@ export function SceneCanvas({
   ])
 
   const handleCreateSnapshotUrl = useCallback(() => {
-    const bindings = sceneSnapshotBindingsRef.current
-    if (!bindings) return
-
-    const snapshot = bindings.captureSnapshot()
+    const snapshot = captureSceneSnapshot()
     if (!snapshot) return
 
     const shareUrl = buildSceneSnapshotShareUrl(snapshot, window.location.href, import.meta.env.BASE_URL)
     setSnapshotShareState((current) => reduceSnapshotShareState(current, { type: 'generated', url: shareUrl }))
-  }, [])
+  }, [captureSceneSnapshot])
 
   const handleCopySnapshotUrl = useCallback(async () => {
     const shareUrl = snapshotShareState.generatedUrl
@@ -933,10 +921,10 @@ export function SceneCanvas({
   }, [snapshotShareState.generatedUrl])
 
   const applySceneSnapshot = useCallback(
-    async (snapshot: SceneSnapshotRestore): Promise<SceneSnapshotRestore> => {
+    async (snapshot: SceneSnapshotRestore): Promise<void> => {
       const controller = controllerRef.current
       const camera = cameraRef.current
-      if (!controller || !camera) return snapshot
+      if (!controller || !camera) return
 
       return applySnapshotView(snapshot, {
         cancelFocusTween: () => cancelFocusTweenRef.current?.(),
@@ -944,8 +932,7 @@ export function SceneCanvas({
           // Keep this one-shot token tightly scoped to real focus changes.
           // If snapshot focus already matches current focus, don't arm a skip
           // token that may never be consumed by updateScene.
-          skipAutoZoomForNextFocusBodyRef.current =
-            nextFocusBody != null && String(nextFocusBody) !== focusBodyRef.current ? String(nextFocusBody) : null
+          skipAutoZoomForNextFocusBodyRef.current = nextFocusBody !== focusBodyRef.current ? nextFocusBody : null
         },
 
         applyScale: (next) => {
@@ -989,7 +976,7 @@ export function SceneCanvas({
         },
 
         applyFocusBody: (nextFocusBody) => {
-          setFocusBody(String(nextFocusBody))
+          setFocusBody(nextFocusBody)
         },
 
         applyPlayer: (next) => {
@@ -1003,7 +990,7 @@ export function SceneCanvas({
           await update(
             {
               etSec: timeStore.getState().etSec,
-              focusBody: String(next.focusBody),
+              focusBody: next.focusBody,
               showJ2000Axes: next.guides.showJ2000Axes,
               showBodyFixedAxes: next.guides.showBodyFixedAxes,
               cameraFovDeg: next.scale.cameraFovDeg,
@@ -1037,15 +1024,6 @@ export function SceneCanvas({
     },
     [timeStore, planetScaleSliderForMultiplier, zoomSliderForRadius],
   )
-
-  applySceneSnapshotRef.current = applySceneSnapshot
-
-  // PR1 foundation integration only: this binds the adapter to live app state so
-  // follow-on PRs can wire URL capture/load without reworking ordering logic.
-  sceneSnapshotBindingsRef.current = {
-    captureSnapshot: captureSceneSnapshot,
-    applySnapshot: applySceneSnapshot,
-  }
 
   // Subscribe to time store changes and update the scene (without React rerenders)
   useEffect(() => {
@@ -1311,7 +1289,7 @@ export function SceneCanvas({
 
         const bootSnapshot = initRuntimeConfigRef.current.snapshot
         if (bootSnapshot) {
-          await applySceneSnapshotRef.current(bootSnapshot)
+          await applySceneSnapshot(bootSnapshot)
         } else {
           await runtime.updateScene({ etSec: timeStore.getState().etSec, ...latestUiRef.current }, { required: true })
         }
@@ -1482,7 +1460,7 @@ export function SceneCanvas({
     })()
 
     return disposeSession
-  }, [timeStore])
+  }, [applySceneSnapshot, timeStore])
 
   // Swap the background elements in-place when toggled.
   useEffect(() => {

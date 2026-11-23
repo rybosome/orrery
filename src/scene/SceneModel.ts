@@ -249,14 +249,3 @@ export interface SceneBody {
 
   style: SceneBodyStyle
 }
-
-/** Top-level scene description: coordinate frame + observer + bodies. */
-export interface SceneModel {
-  /** Frame the scene is rendered in (default should be `"J2000"`). */
-  frame: FrameId
-
-  /** The observer/origin body for relative positions (e.g. `"SUN"`). */
-  observer: BodyRef
-
-  bodies: readonly SceneBody[]
-}

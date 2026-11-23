@@ -1,9 +1,7 @@
 import type { CameraController } from '../controls/CameraController.js'
-import type { BodyRef } from '../spice/types.js'
 import type { TimeState } from '../time/timeStore.js'
 import {
   cameraControllerStateToSnapshotCamera,
-  normalizeSceneSnapshot,
   playbackDirectionForRate,
   type SceneSnapshotCameraV1,
   type SceneSnapshotGuideOptionsV1,
@@ -12,7 +10,7 @@ import {
   type SceneSnapshotRenderingOptionsV1,
   type SceneSnapshotScaleOptionsV1,
   type SceneSnapshotSystemOptionsV1,
-  type SceneSnapshotV1,
+  type SceneSnapshotRestore,
   type SceneSnapshotView,
 } from './sceneSnapshot.js'
 
@@ -26,11 +24,9 @@ export type SceneSnapshotCaptureInput = {
   rendering: SceneSnapshotRenderingOptionsV1
 }
 
-type SnapshotForApply = SceneSnapshotView & { focusBody: BodyRef }
-
 export type SceneSnapshotApplyInput = {
   cancelFocusTween: () => void
-  setSkipAutoZoomForFocusBody: (focusBody: BodyRef | null) => void
+  setSkipAutoZoomForFocusBody: (focusBody: string | null) => void
 
   applyScale: (next: SceneSnapshotScaleOptionsV1) => void
   applyGuides: (next: SceneSnapshotGuideOptionsV1) => void
@@ -38,7 +34,7 @@ export type SceneSnapshotApplyInput = {
   applySystem: (next: SceneSnapshotSystemOptionsV1) => void
   applyRendering: (next: SceneSnapshotRenderingOptionsV1) => void
 
-  applyFocusBody: (focusBody: BodyRef) => void
+  applyFocusBody: (focusBody: string) => void
   applyPlayer: (next: SceneSnapshotPlayerStateV1) => void
 
   /**
@@ -47,7 +43,7 @@ export type SceneSnapshotApplyInput = {
    * If provided, this runs after focus/player/UI state has been queued and before
    * camera restore, which helps avoid focus/camera/time stomping.
    */
-  flushSceneUpdate?: (snapshot: SnapshotForApply) => void | Promise<void>
+  flushSceneUpdate?: (snapshot: SceneSnapshotRestore) => void | Promise<void>
 
   applyCamera: (next: SceneSnapshotCameraV1) => void
 }
@@ -87,18 +83,7 @@ export function captureSnapshotView(input: SceneSnapshotCaptureInput): SceneSnap
  * 4) optionally flush through existing runtime `updateScene`
  * 5) restore camera last
  */
-export async function applySnapshot(
-  snapshotInput: SceneSnapshotV1,
-  input: SceneSnapshotApplyInput,
-): Promise<SceneSnapshotV1> {
-  return applySnapshotView(normalizeSceneSnapshot(snapshotInput), input)
-}
-
-/** Apply an already-validated view without interpreting its wire format. */
-export async function applySnapshotView<T extends SnapshotForApply>(
-  snapshot: T,
-  input: SceneSnapshotApplyInput,
-): Promise<T> {
+export async function applySnapshotView(snapshot: SceneSnapshotRestore, input: SceneSnapshotApplyInput): Promise<void> {
   input.cancelFocusTween()
   input.setSkipAutoZoomForFocusBody(snapshot.focusBody)
 
@@ -114,6 +99,4 @@ export async function applySnapshotView<T extends SnapshotForApply>(
   await input.flushSceneUpdate?.(snapshot)
 
   input.applyCamera(snapshot.camera)
-
-  return snapshot
 }
