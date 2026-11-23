@@ -2,7 +2,9 @@
 
 Minimal Vite + React + TypeScript app that renders a solar system visualization using real space geometry data from NAIF (NASA’s Navigation and Ancillary Information Facility).
 
-[Live Demo](https://orrery.ryboso.me)
+[Explore the Solar System](https://orrery.ryboso.me/sol)
+
+Share the current view from **Controls → System → State**. New links use `/sol/s/<payload>`. Existing share links continue to open the saved Solar System view.
 
 ![orrery screenshot](public/orrery-earth-lighting.png)
 

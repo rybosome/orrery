@@ -1,5 +1,7 @@
+import { buildScenePath } from '../scenes/sceneRoute.js'
+import type { SceneSnapshotV2 } from './sceneSnapshotV2.js'
 import { SNAPSHOT_CANONICAL_PATH_PREFIX } from './sceneSnapshotBoot.js'
-import { encodeSnapshot } from './sceneSnapshotCodec.js'
+import { encodeSnapshot, encodeSnapshotDocument } from './sceneSnapshotCodec.js'
 import type { SceneSnapshotV1 } from './sceneSnapshot.js'
 
 export type SnapshotShareCopyStatus = 'idle' | 'copied' | 'copy_failed'
@@ -42,10 +44,19 @@ export function buildSnapshotShareUrlForLocation(snapshot: SceneSnapshotV1, loca
   return nextUrl.toString()
 }
 
+/** Build a v2 share URL rooted at the app's deployment base. */
+export function buildSceneSnapshotShareUrl(snapshot: SceneSnapshotV2, locationHref: string, base: string): string {
+  const path = `${buildScenePath(snapshot.sceneId, base)}/s/${encodeSnapshotDocument(snapshot)}`
+  return new URL(path, locationHref).toString()
+}
+
 /**
  * Small state reducer used by the System > State snapshot share controls.
  */
-export function reduceSnapshotShareState(state: SnapshotShareState, event: SnapshotShareStateEvent): SnapshotShareState {
+export function reduceSnapshotShareState(
+  state: SnapshotShareState,
+  event: SnapshotShareStateEvent,
+): SnapshotShareState {
   if (event.type === 'generated') {
     return {
       generatedUrl: event.url,

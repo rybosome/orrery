@@ -29,8 +29,9 @@ async function expectSnapshotDeepLinkLoaded(pathname: string, page: Page): Promi
   expect(consoleErrors, `console.error messages:\n${consoleErrors.join('\n')}`).toEqual([])
 }
 
-test('snapshot deep-link loads from canonical bare-root path', async ({ page }) => {
+test('snapshot deep-link loads from the legacy bare-root path', async ({ page }) => {
   await expectSnapshotDeepLinkLoaded(`/${V1_MARS_VIEW_PAYLOAD}?e2e=1`, page)
+  expect(new URL(page.url()).pathname).toBe(`/${V1_MARS_VIEW_PAYLOAD}`)
 })
 
 test('snapshot deep-link still loads from legacy /s path', async ({ page }) => {
@@ -62,4 +63,43 @@ test('an unregistered scene shows a link to Sol', async ({ page }) => {
   await page.goto('/trappist-1')
   await expect(page.getByRole('heading', { name: 'Unknown scene' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open the Solar System' })).toHaveAttribute('href', '/sol')
+})
+
+test('the homepage preserves the arrival query and fragment on /sol', async ({ page }) => {
+  await page.goto('/?e2e=1&et=1234567#controls')
+  await expect(page).toHaveURL(/\/sol\?e2e=1&et=1234567#controls$/)
+  await page.waitForFunction(() => window.__tspice_viewer__rendered_scene === true)
+})
+
+test('the viewer generates a v2 link that restores focus and time', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 650 })
+  await page.goto('/?arrival=1#controls')
+  const expand = page.getByRole('button', { name: 'Expand controls' })
+  await expect(expand).toBeVisible({ timeout: 25_000 })
+  await expand.click()
+
+  const guides = page.getByRole('tab', { name: 'GUIDES', exact: true })
+  const time = page.getByRole('tab', { name: 'TIME', exact: true })
+  const focus = page.getByRole('combobox')
+  await guides.click()
+  await focus.selectOption('MARS')
+  await time.click()
+  await page.getByTitle('Step forward 60s').click()
+  await expect(page.getByText('60.0s', { exact: true })).toBeVisible()
+
+  await page.getByRole('tab', { name: 'SYSTEM', exact: true }).click()
+  await page.getByRole('button', { name: /Create snapshot URL/ }).click()
+  const sharedUrl = await page.locator('.advancedSnapshotUrlValue').textContent()
+  if (!sharedUrl) throw new Error('The viewer did not generate a share link')
+  const link = new URL(sharedUrl)
+  expect(link.pathname).toMatch(/^\/sol\/s\/[A-Za-z0-9_-]+$/)
+  expect(link.search + link.hash).toBe('')
+
+  await page.goto(sharedUrl)
+  await expect(expand).toBeVisible({ timeout: 25_000 })
+  await expand.click()
+  await guides.click()
+  await expect(focus).toHaveValue('MARS')
+  await time.click()
+  await expect(page.getByText('60.0s', { exact: true })).toBeVisible()
 })

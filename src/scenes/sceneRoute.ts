@@ -18,6 +18,13 @@ export function buildScenePath(sceneId: string, base: string): string {
   return `${mountPath(base)}/${sceneId}`
 }
 
+/** On a bare app entry, return its canonical default scene path. */
+export function canonicalHomePath(pathname: string, base: string): string | undefined {
+  const mount = mountPath(base)
+  if (pathname === mount || pathname === `${mount}/`) return buildScenePath(DEFAULT_SCENE.id, base)
+  return undefined
+}
+
 function readLegacyView(payload: string): SceneSnapshotRestore | undefined {
   const decoded = decodeSnapshot(payload)
   if (!decoded.ok) return undefined

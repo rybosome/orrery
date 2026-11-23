@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
+import { resolveSceneRoute } from '../scenes/sceneRoute.js'
 import { parseSnapshotPayloadFromPathname } from './sceneSnapshotBoot.js'
 import { decodeSnapshot } from './sceneSnapshotCodec.js'
 import { createDefaultSceneSnapshotV1 } from './sceneSnapshot.js'
 import {
+  buildSceneSnapshotShareUrl,
   buildSnapshotPathname,
   buildSnapshotShareUrlForLocation,
   INITIAL_SNAPSHOT_SHARE_STATE,
@@ -43,6 +45,23 @@ describe('sceneSnapshotShare', () => {
 
   it('builds canonical `/<payload>` path segments', () => {
     expect(buildSnapshotPathname('abc123')).toBe('/abc123')
+  })
+
+  it('generates a scene-bound v2 link under the deployment base', () => {
+    const view = createDefaultSceneSnapshotV1()
+    const shared = buildSceneSnapshotShareUrl(
+      { ...view, v: 2, sceneId: 'sol', focusBodyId: 'MARS' },
+      'https://orrery.test/viewer/?arrival=1#controls',
+      '/viewer/',
+    )
+    const url = new URL(shared)
+    expect(url.pathname).toMatch(/^\/viewer\/sol\/s\/[A-Za-z0-9_-]+$/)
+    expect(url.search + url.hash).toBe('')
+    expect(resolveSceneRoute(url.pathname, '/viewer/')).toMatchObject({
+      kind: 'scene',
+      scene: { id: 'sol' },
+      snapshot: { focusBody: 'MARS', camera: view.camera, player: view.player },
+    })
   })
 
   it('resets copy state to idle whenever a new URL is generated', () => {
