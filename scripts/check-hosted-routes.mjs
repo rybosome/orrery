@@ -6,6 +6,8 @@ import { V1_MARS_VIEW_PAYLOAD } from '../src/snapshot/fixtures/v1SolViews.ts'
 import { V2_SOL_MARS_VIEW_PAYLOAD } from '../src/snapshot/fixtures/v2SolViews.ts'
 
 const base = new URL(process.argv[2])
+const allowProtectedPreview = process.argv.includes('--allow-protected-preview')
+const accessLogin = new URL('/cdn-cgi/access/login', base).pathname
 const builtShell = await readFile(new URL('../dist/index.html', import.meta.url), 'utf8')
 const entry = builtShell.match(/<script[^>]+src="([^"]+)"/)?.[1]
 assert.ok(entry, 'The build should declare a hashed JavaScript entry point')
@@ -13,7 +15,19 @@ assert.ok(entry, 'The build should declare a hashed JavaScript entry point')
 async function get(path) {
   const url = new URL(path, base)
   const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15_000) })
-  assert.equal(response.status, 200, `${url.pathname} should be served directly`)
+  const location = response.headers.get('location')
+  const destination = location ? new URL(location, url) : null
+  if (
+    allowProtectedPreview &&
+    url.pathname === '/' &&
+    response.status === 302 &&
+    destination?.pathname.startsWith(accessLogin)
+  ) {
+    console.log('The deployed preview requires Cloudflare Access')
+    process.exit(77)
+  }
+  const details = destination ? ` (redirect to ${destination.origin}${destination.pathname})` : ''
+  assert.equal(response.status, 200, `${url.pathname} should be served directly${details}`)
   return response
 }
 
