@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 
 import type { CameraControllerState } from '../controls/CameraController.js'
-import { getHomePresetState } from '../scenes/solHomePresets.js'
 import type { SunToneMap } from '../runtimeConfig/sceneCanvasRuntimeConfig.js'
 import type { BodyRef } from '../spice/types.js'
 import { quantizeEt } from '../time/quantizeEt.js'
@@ -89,6 +88,9 @@ export type SceneSnapshotV1 = {
   rendering: SceneSnapshotRenderingOptionsV1
 }
 
+export type SceneSnapshotView = Omit<SceneSnapshotV1, 'v' | 'focusBody'>
+export type SceneSnapshotRestore = SceneSnapshotView & { focusBody: string }
+
 const CAMERA_RADIUS_MIN = 0.001
 const CAMERA_RADIUS_MAX = 1_000_000
 const CAMERA_PITCH_LIMIT = Math.PI / 2 - 0.01
@@ -133,14 +135,15 @@ const SUN_EMISSIVE_INTENSITY_MAX = 20
 
 const DEFAULT_FOCUS_BODY: BodyRef = 'EARTH'
 
-const DEFAULT_CAMERA_STATE: CameraControllerState = getHomePresetState(DEFAULT_FOCUS_BODY) ?? {
-  target: new THREE.Vector3(0, 0, 0),
-  radius: 1,
-  yaw: 0,
-  pitch: 0,
-  lookYaw: 0,
-  lookPitch: 0,
-  lookRoll: 0,
+// Frozen v1 camera fallback from the released Earth home view.
+const V1_CAMERA_FALLBACK: SceneSnapshotCameraV1 = {
+  target: [0, 0, 0],
+  radius: 0.033797928930631244,
+  yaw: 1.1347279301938313,
+  pitch: 0.2849217030601857,
+  lookYaw: -0.001477578515780984,
+  lookPitch: -0.0013879921799879952,
+  lookRoll: -0.0007037276316926686,
 }
 
 const COLOR_HEX_RE = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/
@@ -250,11 +253,9 @@ export function snapshotCameraToControllerState(camera: SceneSnapshotCameraV1): 
 
 /** Build the default v1 snapshot used as the normalization fallback baseline. */
 export function createDefaultSceneSnapshotV1(): SceneSnapshotV1 {
-  const camera = cameraControllerStateToSnapshotCamera(DEFAULT_CAMERA_STATE)
-
   return {
     v: SCENE_SNAPSHOT_SCHEMA_VERSION,
-    camera,
+    camera: { ...V1_CAMERA_FALLBACK },
     focusBody: DEFAULT_FOCUS_BODY,
     player: {
       etSec: quantizeEt(0, DEFAULT_QUANTUM_SEC),

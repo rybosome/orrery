@@ -22,6 +22,7 @@ on:
       - ".github/workflows/reusable-node-pnpm.yml"
       - ".github/actions/setup-pnpm-node/**"
       - "scripts/read-pnpm-version.cjs"
+      - "scripts/check-hosted-routes.mjs"
 
 jobs:
   deploy-production:
@@ -213,6 +214,24 @@ jobs:
             pages deploy dist
             --project-name "${{ env.PAGES_PROJECT }}"
             --branch "${{ env.PREVIEW_BRANCH }}"
+
+      - name: Verify preview routes and assets
+        run: |
+          set -euo pipefail
+          status=0
+          node scripts/check-hosted-routes.mjs "$PREVIEW_URL" --allow-protected-preview || status=$?
+          if [[ "$status" != 77 ]]; then
+            exit "$status"
+          fi
+
+          echo "::notice::The preview requires Cloudflare Access. Checking the deployed build with Wrangler's Pages runtime."
+          pnpm dlx wrangler@3.90.0 pages dev dist --ip 127.0.0.1 --port 8788 > "$RUNNER_TEMP/orrery-pages-dev.log" 2>&1 &
+          pages_pid=$!
+          trap 'kill "$pages_pid" 2>/dev/null || true' EXIT
+          node scripts/check-hosted-routes.mjs http://127.0.0.1:8788/ || {
+            cat "$RUNNER_TEMP/orrery-pages-dev.log"
+            exit 1
+          }
 
       - name: Find existing orrery preview comment
         id: find_preview_comment
