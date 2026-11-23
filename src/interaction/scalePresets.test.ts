@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 
 import { CameraController } from '../controls/CameraController.js'
-import { SOLAR_SCALE_CAMERA_STATE } from './scalePresets.js'
+import { SOLAR_SCALE_CAMERA_STATE } from '../scenes/solScalePresets.js'
 
 describe('scale presets', () => {
   it('restores the authoritative Solar camera pose', () => {

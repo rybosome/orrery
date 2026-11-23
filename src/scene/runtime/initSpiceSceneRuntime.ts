@@ -3,10 +3,9 @@ import type { SpiceAsync, StateVector } from '@rybosome/tspice'
 
 import { computeOrbitAnglesToKeepPointInView, isDirectionWithinFov } from '../../controls/sunFocus.js'
 import { createSpiceClient } from '../../spice/createSpiceClient.js'
-import type { BodyRef, EtSeconds, Mat3, Vec3Km } from '../../spice/types.js'
+import type { EtSeconds, Mat3, Vec3Km } from '../../spice/types.js'
 import { createBodyMesh } from '../BodyMesh.js'
 import { SUN_BLOOM_LAYER } from '../../renderLayers.js'
-import { getBodyRegistryEntryByBodyRef, resolveBodyRegistryEntry, type BodyId } from '../BodyRegistry.js'
 import { computeBodyRadiusWorld } from '../bodyScaling.js'
 import { createFrameAxes, mat3ToMatrix4 } from '../FrameAxes.js'
 import { OrbitPaths } from '../orbits/OrbitPaths.js'
@@ -20,11 +19,9 @@ import type { CameraController, CameraControllerState } from '../../controls/Cam
 import { shouldAutoZoomOnFocusChange } from './focusAutoZoom.js'
 import { createSceneResources } from './sceneResources.js'
 
-const SUN_BODY_ID: BodyId = 'SUN'
-
 export type SceneUiState = {
   etSec: EtSeconds
-  focusBody: BodyRef
+  focusBody: string
   showJ2000Axes: boolean
   showBodyFixedAxes: boolean
   cameraFovDeg: number
@@ -88,7 +85,6 @@ type SpiceSceneRuntimeOptions = {
   /** Called during auto-focus for non-home presets. */
   resetLookOffset: (() => void) | undefined
 
-  getHomePresetState: (focusBody: BodyRef) => CameraControllerState | null
   initialControllerStateRef: { current: CameraControllerState | null }
 
   /**
@@ -96,9 +92,9 @@ type SpiceSceneRuntimeOptions = {
    * runtime's auto-zoom/home-preset camera overrides. This is consumed (cleared)
    * after the focus change is observed.
    */
-  skipAutoZoomForNextFocusBodyRef?: { current: BodyRef | null }
+  skipAutoZoomForNextFocusBodyRef?: { current: string | null }
 
-  selectedBodyIdRef: { current: BodyId | undefined }
+  selectedBodyIdRef: { current: string | undefined }
 
   invalidate: () => void
 }
@@ -135,7 +131,6 @@ async function buildSceneRuntime(
     cancelFocusTween,
     focusOn,
     resetLookOffset,
-    getHomePresetState,
     initialControllerStateRef,
     skipAutoZoomForNextFocusBodyRef,
     selectedBodyIdRef,
@@ -172,20 +167,21 @@ async function buildSceneRuntime(
   resources.add(installTspiceViewerE2eApi({ isE2e, spice: cachedSpice }))
 
   const { frame, observer } = definition.coordinates
+  const starId = definition.primaryLight.bodyId
+  const observerKey = String(observer)
   const bodies = definition.bodies.map((body) => {
-    const registry = resolveBodyRegistryEntry(String(body.body)) ?? getBodyRegistryEntryByBodyRef(body.body)
-    const bodyId = registry?.id
+    const bodyId = body.id
 
     const { mesh, dispose, ready, update } = createBodyMesh({
       bodyId,
       appearance: body.style.appearance,
     })
 
-    mesh.userData.bodyId = bodyId ?? body.body
+    mesh.userData.bodyId = bodyId
     // Store radiusKm for dynamic scale updates
     mesh.userData.radiusKm = body.style.radiusKm
 
-    if (bodyId === SUN_BODY_ID) {
+    if (bodyId === starId) {
       mesh.layers.enable(SUN_BLOOM_LAYER)
     }
 
@@ -206,6 +202,8 @@ async function buildSceneRuntime(
     return {
       body: body.body,
       bodyId,
+      label: body.style.label ?? body.id,
+      kind: body.kind,
       bodyFixedFrame: body.bodyFixedFrame,
       radiusKm: body.style.radiusKm,
       mesh,
@@ -219,7 +217,9 @@ async function buildSceneRuntime(
     }
   })
 
-  const sunMesh = bodies.find((b) => b.bodyId === SUN_BODY_ID)?.mesh
+  const bodiesById = new Map(bodies.map((body) => [body.bodyId, body]))
+  const star = bodiesById.get(starId)
+  const sunMesh = star?.mesh
   const sunMaterial = (() => {
     const m = sunMesh?.material
     if (!m) return null
@@ -231,12 +231,25 @@ async function buildSceneRuntime(
 
   signal.throwIfAborted()
 
-  // Orbit paths (one full orbital period per body).
-  const orbitPaths = new OrbitPaths({
-    spice: cachedSpice,
-    kmToWorld,
-    bodies: definition.bodies.map((b) => ({ body: b.body, color: b.style.appearance.surface.color })),
-  })
+  const guides = definition.bodies.flatMap((body) =>
+    body.orbitGuide
+      ? [
+          {
+            id: body.id,
+            target: body.body,
+            color: body.style.appearance.surface.color,
+            ...body.orbitGuide,
+          },
+        ]
+      : [],
+  )
+  const orbitPaths = new OrbitPaths({ spice: cachedSpice, kmToWorld, frame, bounds, guides, invalidate })
+  const renderTargets = new Set(bodies.map((body) => String(body.body)))
+  const hiddenCenterKeys = [...new Set(guides.map((guide) => String(guide.center)))].filter(
+    (key) => key !== observerKey && !renderTargets.has(key),
+  )
+  let hiddenCenterSample: { etSec: EtSeconds; positions: Promise<Array<readonly [string, Vec3Km] | null>> } | undefined
+
   sceneObjects.push(orbitPaths.object)
   resources.add(() => orbitPaths.dispose())
   scene.add(orbitPaths.object)
@@ -276,26 +289,14 @@ async function buildSceneRuntime(
     }
   }
 
-  const labelBodies: LabelBody[] = bodies.flatMap((b) => {
-    const registry = resolveBodyRegistryEntry(String(b.body)) ?? getBodyRegistryEntryByBodyRef(b.body)
-
-    // `LabelOverlay` keys labels by `BodyId`, so avoid inventing ids for
-    // unregistered bodies. (Unregistered bodies can still be interacted with,
-    // they just won't participate in label overlay state.)
-    if (!registry) return []
-
-    return [
-      {
-        id: registry.id,
-        label: registry.style.label ?? String(b.body),
-        kind: registry.kind,
-        mesh: b.mesh,
-        radiusKm: b.radiusKm,
-      },
-    ]
-  })
-
-  let lastAutoZoomFocusBody: BodyRef | undefined
+  const labelBodies: LabelBody[] = bodies.map((b) => ({
+    id: b.bodyId,
+    label: b.label,
+    kind: b.kind,
+    mesh: b.mesh,
+    radiusKm: b.radiusKm,
+  }))
+  let lastAutoZoomFocusBody: string | undefined
 
   // ---------------------------------------------------------------------------
   // SPICE cache
@@ -315,7 +316,7 @@ async function buildSceneRuntime(
     const statePromises = bodies.map((b) =>
       cachedSpice.kit.getState({
         target: String(b.body),
-        observer: String(observer),
+        observer: observerKey,
         at: etSec,
         frame,
       }),
@@ -340,8 +341,8 @@ async function buildSceneRuntime(
     }
   }
 
-  const bodyPosKmByKey = new Map<string, Vec3Km>()
-  const bodyVisibleByKey = new Map<string, boolean>()
+  const centerPositions = new Map<string, Vec3Km>()
+  const bodyVisibility = new Map<string, boolean>()
 
   const ORBIT_MIN_POINTS_PER_ORBIT = 32
 
@@ -396,7 +397,7 @@ async function buildSceneRuntime(
           skipAutoZoomForFocusBody,
         })
 
-      const homePreset = shouldAutoZoomThisTick ? getHomePresetState(next.focusBody) : null
+      const homePreset = shouldAutoZoomThisTick ? definition.viewer.homePoses.get(next.focusBody) : undefined
 
       if (shouldSkipAutoZoomForFocusBody) {
         cancelFocusTween?.()
@@ -424,30 +425,11 @@ async function buildSceneRuntime(
         }
       }
 
-      // Focus position (absolute, relative to scene observer).
-      let focusPosKm: Vec3Km | null = null
-      if (String(next.focusBody) === SUN_BODY_ID) {
-        focusPosKm = [0, 0, 0] as Vec3Km
-      } else {
-        const focusBodyMeta = bodies.find((b) => String(b.body) === String(next.focusBody))
-        const cached = focusBodyMeta?.lastState?.position
-        if (cached) focusPosKm = cached
-      }
-
-      // If the focus body isn't in the rendered set, fetch just its state.
-      if (!focusPosKm) {
-        const focusState = await cachedSpice.kit.getState({
-          target: String(next.focusBody),
-          observer: String(observer),
-          at: next.etSec,
-          frame,
-        })
-
-        if (isDisposed()) return
-        if (token !== sceneUpdateToken) return
-
-        focusPosKm = focusState.position
-      }
+      const focusBodyMeta = bodiesById.get(next.focusBody)
+      const focusPosKm = focusBodyMeta?.lastState?.position
+      const starPosKm = star?.lastState?.position
+      if (!focusPosKm || !starPosKm) throw new Error(`Scene position missing for "${next.focusBody}" or "${starId}"`)
+      const sunDirKm = rebasePositionKm(starPosKm, focusPosKm)
 
       if (shouldAutoZoomThisTick) {
         // Home preset beats the normal auto-zoom + sun-in-view heuristics.
@@ -463,7 +445,6 @@ async function buildSceneRuntime(
 
           lastAutoZoomFocusBody = next.focusBody
         } else {
-          const focusBodyMeta = bodies.find((b) => String(b.body) === String(next.focusBody))
           if (focusBodyMeta) {
             let radiusWorld = computeBodyRadiusWorld({
               radiusKm: focusBodyMeta.radiusKm,
@@ -472,17 +453,17 @@ async function buildSceneRuntime(
             })
 
             // Match the rendered size when auto-zooming.
-            radiusWorld *= String(next.focusBody) === SUN_BODY_ID ? next.sunScaleMultiplier : next.planetScaleMultiplier
+            radiusWorld *= String(next.focusBody) === starId ? next.sunScaleMultiplier : next.planetScaleMultiplier
 
             const nextRadius = computeFocusRadius(radiusWorld)
 
             // When focusing a non-Sun body, bias the camera orientation so the
             // Sun remains visible (it provides important spatial context).
-            if (String(next.focusBody) !== SUN_BODY_ID) {
+            if (String(next.focusBody) !== starId) {
               const sunPosWorld = new THREE.Vector3(
-                -focusPosKm[0] * kmToWorld,
-                -focusPosKm[1] * kmToWorld,
-                -focusPosKm[2] * kmToWorld,
+                sunDirKm[0] * kmToWorld,
+                sunDirKm[1] * kmToWorld,
+                sunDirKm[2] * kmToWorld,
               )
 
               if (sunPosWorld.lengthSq() > 1e-12) {
@@ -554,15 +535,42 @@ async function buildSceneRuntime(
         }
       }
 
-      bodyPosKmByKey.clear()
-      bodyVisibleByKey.clear()
+      centerPositions.clear()
+      centerPositions.set(observerKey, [0, 0, 0])
+      if (next.orbitPathsEnabled && hiddenCenterKeys.length) {
+        if (hiddenCenterSample?.etSec !== next.etSec) {
+          const positions = Promise.all(
+            hiddenCenterKeys.map(async (center) => {
+              try {
+                const state = await cachedSpice.kit.getState({
+                  target: center,
+                  observer: observerKey,
+                  at: next.etSec,
+                  frame,
+                })
+                return [center, state.position] as const
+              } catch (error) {
+                if (!isDisposed()) console.warn('Orbit guide center unavailable', center, error)
+                return null
+              }
+            }),
+          )
+          hiddenCenterSample = { etSec: next.etSec, positions }
+        }
+        const positions = await hiddenCenterSample.positions
+        if (isDisposed() || token !== sceneUpdateToken) return
+        for (const entry of positions) {
+          if (entry) centerPositions.set(...entry)
+        }
+      }
+      bodyVisibility.clear()
 
       for (const b of bodies) {
         const state = b.lastState
         if (!state) continue
 
-        bodyPosKmByKey.set(String(b.body), state.position)
-        bodyVisibleByKey.set(String(b.body), b.mesh.visible)
+        centerPositions.set(String(b.body), state.position)
+        bodyVisibility.set(b.bodyId, b.mesh.visible)
 
         const rebasedKm = rebasePositionKm(state.position, focusPosKm)
         b.mesh.position.set(rebasedKm[0] * kmToWorld, rebasedKm[1] * kmToWorld, rebasedKm[2] * kmToWorld)
@@ -575,7 +583,7 @@ async function buildSceneRuntime(
         })
 
         // Apply Sun scale multiplier (Sun only)
-        if (b.bodyId === SUN_BODY_ID) {
+        if (b.bodyId === starId) {
           radiusWorld *= next.sunScaleMultiplier
         } else {
           radiusWorld *= next.planetScaleMultiplier
@@ -608,8 +616,8 @@ async function buildSceneRuntime(
           orbitPaths.update({
             etSec: next.etSec,
             focusPosKm,
-            bodyPosKmByKey,
-            bodyVisibleByKey,
+            centerPositions,
+            bodyVisibility,
             settings: {
               lineWidthPx: next.orbitLineWidthPx,
               samplesPerOrbit: next.orbitSamplesPerOrbit,
@@ -628,15 +636,6 @@ async function buildSceneRuntime(
         }
       }
 
-      // SPICE-derived sun lighting direction.
-      //
-      // If observer is the Sun, then Sun position relative to the focused body
-      // is just `-focusPosKm`.
-      const sunDirKm =
-        String(next.focusBody) === SUN_BODY_ID
-          ? ([0, 0, 0] as Vec3Km)
-          : ([-focusPosKm[0], -focusPosKm[1], -focusPosKm[2]] as Vec3Km)
-
       const sunDirVec = new THREE.Vector3(sunDirKm[0], sunDirKm[1], sunDirKm[2])
       const sunDirLen2 = sunDirVec.lengthSq()
       // Normalize and use as directional light position (fallback to +X+Y+Z if degenerate).
@@ -654,7 +653,7 @@ async function buildSceneRuntime(
       // Record label overlay inputs so we can update it on camera movement.
       latestLabelOverlayOptions = {
         bodies: labelBodies,
-        focusBodyId: resolveBodyRegistryEntry(String(next.focusBody))?.id,
+        focusBodyId: next.focusBody,
         selectedBodyId: selectedBodyIdRef.current,
         labelsEnabled: next.labelsEnabled,
         occlusionEnabled: next.labelOcclusionEnabled,

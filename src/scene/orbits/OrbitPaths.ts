@@ -5,16 +5,8 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import type { SpiceAsync } from '@rybosome/tspice'
 
 import { quantizeEt } from '../../time/quantizeEt.js'
-import { J2000_FRAME, type BodyRef, type EtSeconds, type Vec3Km } from '../../spice/types.js'
+import type { BodyRef, EtSeconds, FrameId, Vec3Km } from '../../spice/types.js'
 import { rebasePositionKm } from '../precision.js'
-import { getApproxOrbitalPeriodSec, getOrbitAnchorQuantumSec } from './orbitalPeriods.js'
-
-const DAY_SEC = 86_400
-// Outer planet orbital periods can exceed the coverage window of lightweight
-// ephemeris kernels (e.g. `de432s`), which can make sampling a full orbit fail
-// and hide the path. Clamp long orbits to a smaller time window to keep them
-// visible.
-const MAX_ORBIT_SAMPLE_WINDOW_SEC = 50 * 365.25 * DAY_SEC
 
 export type OrbitPathsSettings = {
   lineWidthPx: number
@@ -25,15 +17,17 @@ export type OrbitPathsSettings = {
 }
 
 export type OrbitPathsBodySpec = {
-  body: BodyRef
+  id: string
+  target: BodyRef
+  center: BodyRef
+  spanSec: number
+  periodSec?: number
+  resampleEverySec: number
   color: THREE.ColorRepresentation
 }
 
 type OrbitPathState = {
-  target: BodyRef
-  primary: BodyRef
-  periodSec: number
-  anchorQuantumSec: number
+  guide: OrbitPathsBodySpec
 
   group: THREE.Group
   material: LineMaterial
@@ -55,13 +49,6 @@ type OrbitPathState = {
     token: number
     abort: AbortController
   }
-}
-
-function getOrbitPrimary(body: BodyRef): BodyRef | undefined {
-  const key = String(body)
-  if (key === 'SUN') return undefined
-  if (key === 'MOON') return 'EARTH'
-  return 'SUN'
 }
 
 function yieldToMainThread(): Promise<void> {
@@ -112,32 +99,37 @@ export class OrbitPaths {
 
   private readonly spice: SpiceAsync
   private readonly kmToWorld: number
+  private readonly frame: FrameId
+  private readonly bounds: { minEtSec: number; maxEtSec: number }
+  private readonly invalidate: () => void
   private readonly orbits: OrbitPathState[]
   private readonly resolution = new THREE.Vector2(1, 1)
   private samplingToken = 0
 
   /** Create orbit paths for the provided bodies (sampling happens on-demand in {@link update}). */
-  constructor(opts: { spice: SpiceAsync; kmToWorld: number; bodies: readonly OrbitPathsBodySpec[] }) {
+  constructor(opts: {
+    spice: SpiceAsync
+    kmToWorld: number
+    frame: FrameId
+    bounds: { minEtSec: number; maxEtSec: number }
+    guides: readonly OrbitPathsBodySpec[]
+    invalidate: () => void
+  }) {
     this.spice = opts.spice
     this.kmToWorld = opts.kmToWorld
+    this.frame = opts.frame
+    this.bounds = opts.bounds
+    this.invalidate = opts.invalidate
     this.object = new THREE.Group()
     this.object.name = 'OrbitPaths'
 
     const orbits: OrbitPathState[] = []
-    for (const b of opts.bodies) {
-      const primary = getOrbitPrimary(b.body)
-      if (!primary) continue
-
-      const periodSec = getApproxOrbitalPeriodSec(b.body)
-      if (!periodSec || !Number.isFinite(periodSec) || periodSec <= 0) continue
-
-      const anchorQuantumSec = getOrbitAnchorQuantumSec(b.body)
-
+    for (const guide of opts.guides) {
       const group = new THREE.Group()
-      group.name = `OrbitPath(${String(b.body)})`
+      group.name = `OrbitPath(${guide.id})`
 
       const material = new LineMaterial({
-        color: new THREE.Color(b.color).getHex(),
+        color: new THREE.Color(guide.color).getHex(),
         linewidth: 1,
         worldUnits: false,
         transparent: true,
@@ -149,10 +141,7 @@ export class OrbitPaths {
       this.object.add(group)
 
       orbits.push({
-        target: b.body,
-        primary,
-        periodSec,
-        anchorQuantumSec,
+        guide,
         group,
         material,
         segments: [],
@@ -191,11 +180,11 @@ export class OrbitPaths {
   update(input: {
     etSec: EtSeconds
     focusPosKm: Vec3Km
-    bodyPosKmByKey: ReadonlyMap<string, Vec3Km>
-    bodyVisibleByKey: ReadonlyMap<string, boolean>
+    centerPositions: ReadonlyMap<string, Vec3Km>
+    bodyVisibility: ReadonlyMap<string, boolean>
     settings: OrbitPathsSettings
   }) {
-    const visibleOrbits = this.orbits.filter((o) => input.bodyVisibleByKey.get(String(o.target)) !== false)
+    const visibleOrbits = this.orbits.filter((o) => input.bodyVisibility.get(o.guide.id) !== false)
     const pointsPerOrbit = computePointsPerOrbit({
       samplesPerOrbit: input.settings.samplesPerOrbit,
       maxTotalPoints: input.settings.maxTotalPoints,
@@ -206,10 +195,10 @@ export class OrbitPaths {
     const settingsKey = `${input.settings.lineWidthPx}|${pointsPerOrbit}|${input.settings.antialias}`
 
     for (const o of this.orbits) {
-      const targetKey = String(o.target)
-      const visible = input.bodyVisibleByKey.get(targetKey) !== false
+      const targetKey = o.guide.id
+      const visible = input.bodyVisibility.get(targetKey) !== false
 
-      const primaryPosKm = input.bodyPosKmByKey.get(String(o.primary))
+      const primaryPosKm = input.centerPositions.get(String(o.guide.center))
       const canPlace = Boolean(primaryPosKm)
 
       // If we don't know where the primary is, hide the orbit to avoid placing it at origin.
@@ -233,7 +222,7 @@ export class OrbitPaths {
         o.material.needsUpdate = true
       }
 
-      const anchorEtSec = quantizeEt(input.etSec, o.anchorQuantumSec)
+      const anchorEtSec = quantizeEt(input.etSec, o.guide.resampleEverySec)
 
       const becameVisible = visible && !o.wasVisible
       o.wasVisible = visible
@@ -262,10 +251,8 @@ export class OrbitPaths {
     o.inFlight = { token, abort }
 
     void this.sampleOrbitPositionsKm({
-      target: o.target,
-      primary: o.primary,
+      guide: o.guide,
       anchorEtSec: opts.anchorEtSec,
-      periodSec: o.periodSec,
       points: opts.points,
       signal: abort.signal,
     })
@@ -277,6 +264,7 @@ export class OrbitPaths {
         // If sampling succeeded but returned too few positions, treat it as failure.
         if (segmentsKm.length === 0) {
           // Hide only if we've never had usable geometry; otherwise keep the last good path.
+          console.warn('Orbit guide has no usable samples', o.guide.id)
           if (!o.hasGeometry) {
             o.group.visible = false
           }
@@ -297,11 +285,12 @@ export class OrbitPaths {
 
         this.setOrbitSegments(o, segmentsWorld)
         o.hasGeometry = true
+        this.invalidate()
       })
       .catch((err) => {
         // Best-effort: don't crash the viewer if an orbit can't be sampled.
         // (Common cause: missing kernels for a body.)
-        console.warn('Orbit path sampling failed', { target: o.target, primary: o.primary }, err)
+        console.warn('Orbit path sampling failed', { target: o.guide.target, center: o.guide.center }, err)
         if (abort.signal.aborted) return
         if (o.inFlight?.token !== token) return
         o.inFlight = undefined
@@ -319,7 +308,7 @@ export class OrbitPaths {
       const geometry = new LineGeometry()
       const line = new Line2(geometry, o.material)
       line.frustumCulled = false
-      line.name = `OrbitLine(${String(o.target)})#${i}`
+      line.name = `OrbitLine(${o.guide.id})#${i}`
       o.group.add(line)
       o.segments.push({ geometry, line })
     }
@@ -338,21 +327,17 @@ export class OrbitPaths {
   }
 
   private async sampleOrbitPositionsKm(input: {
-    target: BodyRef
-    primary: BodyRef
+    guide: OrbitPathsBodySpec
     anchorEtSec: number
-    periodSec: number
     points: number
     signal: AbortSignal
   }): Promise<Vec3Km[][]> {
-    const windowSec = Math.min(input.periodSec, MAX_ORBIT_SAMPLE_WINDOW_SEC)
-
-    // If we clamp the sampling window, scale down the number of points
-    // proportionally so point density (points/sec) stays stable.
-    const windowRatio = input.periodSec > 0 ? windowSec / input.periodSec : 1
+    const { minEtSec, maxEtSec } = this.bounds
+    const { guide } = input
+    const windowSec = Math.min(guide.spanSec, maxEtSec - minEtSec)
+    const windowRatio = windowSec / (guide.periodSec ?? guide.spanSec)
     const points = Math.max(2, Math.floor(Math.max(2, input.points) * windowRatio))
-    // Anchor to current time, centered in the window.
-    const startEt = input.anchorEtSec - windowSec * 0.5
+    const startEt = Math.max(minEtSec, Math.min(maxEtSec - windowSec, input.anchorEtSec - windowSec * 0.5))
     const stepSec = windowSec / (points - 1)
 
     const segments: Vec3Km[][] = []
@@ -366,13 +351,13 @@ export class OrbitPaths {
     for (let i = 0; i < points; i++) {
       if (input.signal.aborted) return []
 
-      const et = startEt + stepSec * i
+      const et = Math.min(maxEtSec, startEt + stepSec * i)
       try {
         const state = await this.spice.kit.getState({
-          target: String(input.target),
-          observer: String(input.primary),
+          target: String(guide.target),
+          observer: String(guide.center),
           at: et,
-          frame: J2000_FRAME,
+          frame: this.frame,
         })
         current.push(state.position)
       } catch {

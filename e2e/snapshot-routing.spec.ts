@@ -22,7 +22,7 @@ async function expectSnapshotDeepLinkLoaded(pathname: string, page: Page): Promi
   await expect(page.getByRole('heading', { name: 'Orrery' })).toBeVisible()
   await expect(page.getByText('Invalid shared snapshot URL. Loaded default scene state instead.')).toHaveCount(0)
 
-  await expect(page.getByText('Focus Body: 4', { exact: true })).toBeVisible()
+  await expect(page.getByText('Focus Body: MARS', { exact: true })).toBeVisible()
 
   expect(pageErrors, `pageerror events:\n${pageErrors.join('\n')}`).toEqual([])
   expect(consoleErrors, `console.error messages:\n${consoleErrors.join('\n')}`).toEqual([])

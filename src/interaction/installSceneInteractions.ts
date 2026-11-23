@@ -1,8 +1,6 @@
 import * as THREE from 'three'
 import type { CameraController } from '../controls/CameraController.js'
 import { pickFirstIntersection } from './pick.js'
-import { resolveBodyRegistryEntry, type BodyId } from '../scene/BodyRegistry.js'
-import type { BodyRef } from '../spice/types.js'
 
 export type SelectionOverlayTarget = {
   setSelectedTarget: (mesh: THREE.Object3D | undefined) => void
@@ -29,9 +27,10 @@ export function installSceneInteractions(args: {
 
   computeFocusRadius: (radiusWorld: number) => number
 
-  setFocusBody: (body: BodyRef) => void
+  sceneBodyIds: ReadonlySet<string>
+  setFocusBody: (body: string) => void
   setSelectedBody: (body: string | null) => void
-  selectedBodyIdRef: { current: BodyId | undefined }
+  selectedBodyIdRef: { current: string | undefined }
 
   selectionOverlay?: SelectionOverlayTarget
   panModeEnabledRef: { current: boolean }
@@ -48,6 +47,7 @@ export function installSceneInteractions(args: {
     renderOnce,
     computeFocusRadius,
     setFocusBody,
+    sceneBodyIds,
     setSelectedBody,
     selectedBodyIdRef,
     selectionOverlay,
@@ -78,24 +78,12 @@ export function installSceneInteractions(args: {
 
   const resolveMeshBody = (mesh: THREE.Mesh) => {
     const raw = String(mesh.userData.bodyId ?? '').trim() || undefined
-    if (!raw) {
-      return {
-        selectedUiId: undefined as string | undefined,
-        focusBody: undefined as BodyRef | undefined,
-        registryId: undefined as BodyId | undefined,
-      }
+    const bodyId = raw && sceneBodyIds.has(raw) ? raw : undefined
+    return {
+      selectedUiId: bodyId ?? (raw ? `${UI_SELECTION_PREFIX}${raw}` : undefined),
+      focusBody: bodyId,
+      bodyId,
     }
-
-    // Prefer the registry's `body` (numeric SPICE target, often barycenter ids like 5/6/7) for focusing,
-    // but keep a stable string id for UI/selection bookkeeping.
-    const registry = resolveBodyRegistryEntry(raw)
-    const registryId = registry?.id
-    const selectedUiId = registryId ?? `${UI_SELECTION_PREFIX}${raw}`
-    // IMPORTANT: don't pass arbitrary strings to SPICE. Only update focus-body
-    // when we can resolve via the registry.
-    const focusBody = registry?.body
-
-    return { selectedUiId, focusBody, registryId }
   }
 
   let focusTweenFrame: number | null = null
@@ -254,7 +242,7 @@ export function installSceneInteractions(args: {
     selectedUiId = resolved.selectedUiId
 
     // Keep ref in sync for label overlay
-    selectedBodyIdRef.current = resolved.registryId
+    selectedBodyIdRef.current = resolved.bodyId
 
     // Update React state for inspector panel
     if (resolved.selectedUiId) {
@@ -673,7 +661,7 @@ export function installSceneInteractions(args: {
               if (resolved.focusBody) {
                 setFocusBody(resolved.focusBody)
               } else {
-                // Registry resolution failed, so we can't safely focus via
+                // The mesh has no scene body, so we can't safely focus via
                 // SPICE. Fall back to focusing by world position.
                 const target = new THREE.Vector3()
                 hitMesh.getWorldPosition(target)
@@ -796,7 +784,7 @@ export function installSceneInteractions(args: {
         return
       }
 
-      // Registry resolution failed, so we can't safely focus via SPICE. Fall
+      // The mesh has no scene body, so we can't safely focus via SPICE. Fall
       // back to focusing by world position.
       const target = new THREE.Vector3()
       hitMesh.getWorldPosition(target)

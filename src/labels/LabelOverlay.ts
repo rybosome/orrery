@@ -11,7 +11,7 @@
  */
 
 import * as THREE from 'three'
-import type { BodyId, BodyKind } from '../scene/BodyRegistry.js'
+import type { SceneBodyDefinition } from '../scenes/sceneDefinition.js'
 
 // ---------- Types ----------
 
@@ -19,9 +19,9 @@ import type { BodyId, BodyKind } from '../scene/BodyRegistry.js'
  * Body metadata needed to render a label + leader line.
  */
 export interface LabelBody {
-  id: BodyId
+  id: string
   label: string
-  kind: BodyKind
+  kind: SceneBodyDefinition['kind']
   mesh: THREE.Mesh
   radiusKm: number
 }
@@ -36,8 +36,8 @@ export interface LabelOverlayOptions {
 /** Per-frame update options for {@link LabelOverlay.update}. */
 export interface LabelOverlayUpdateOptions {
   bodies: LabelBody[]
-  focusBodyId: BodyId | undefined
-  selectedBodyId: BodyId | undefined
+  focusBodyId: string | undefined
+  selectedBodyId: string | undefined
   labelsEnabled: boolean
   occlusionEnabled: boolean
   pickables: THREE.Mesh[]
