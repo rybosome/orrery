@@ -3,22 +3,16 @@ import type { SpiceAsync, StateVector } from '@rybosome/tspice'
 
 import { computeOrbitAnglesToKeepPointInView, isDirectionWithinFov } from '../../controls/sunFocus.js'
 import { createSpiceClient } from '../../spice/createSpiceClient.js'
-import { J2000_FRAME, type BodyRef, type EtSeconds, type Mat3, type Vec3Km } from '../../spice/types.js'
+import type { BodyRef, EtSeconds, Mat3, Vec3Km } from '../../spice/types.js'
 import { createBodyMesh } from '../BodyMesh.js'
 import { SUN_BLOOM_LAYER } from '../../renderLayers.js'
-import {
-  getBodyRegistryEntry,
-  getBodyRegistryEntryByBodyRef,
-  resolveBodyRegistryEntry,
-  listDefaultVisibleSceneBodies,
-  type BodyId,
-} from '../BodyRegistry.js'
+import { getBodyRegistryEntryByBodyRef, resolveBodyRegistryEntry, type BodyId } from '../BodyRegistry.js'
 import { computeBodyRadiusWorld } from '../bodyScaling.js'
 import { createFrameAxes, mat3ToMatrix4 } from '../FrameAxes.js'
 import { OrbitPaths } from '../orbits/OrbitPaths.js'
 import { rebasePositionKm } from '../precision.js'
 import { clearTextureCache } from '../loadTextureCached.js'
-import type { SceneModel } from '../SceneModel.js'
+import type { SceneDefinition } from '../../scenes/sceneDefinition.js'
 import { LabelOverlay, type LabelBody, type LabelOverlayUpdateOptions } from '../../labels/LabelOverlay.js'
 import { timeStore } from '../../time/timeStore.js'
 import { computeViewerScrubRangeEt } from '../../time/viewerTimeBounds.js'
@@ -72,6 +66,7 @@ export type SpiceSceneRuntime = {
  * Initialize the SPICE-backed scene runtime (kernel loading, body meshes, orbit paths, labels, etc).
  */
 export async function initSpiceSceneRuntime(args: {
+  definition: SceneDefinition
   isE2e: boolean
   initialEt: number | null
 
@@ -115,6 +110,7 @@ export async function initSpiceSceneRuntime(args: {
   isDisposed: () => boolean
 }): Promise<SpiceSceneRuntime> {
   const {
+    definition,
     isE2e,
     initialEt,
     scene,
@@ -142,16 +138,16 @@ export async function initSpiceSceneRuntime(args: {
   const disposers: Array<() => void> = []
 
   // Lighting (owned by the scene runtime)
-  const ambient = new THREE.AmbientLight(0xffffff, 0.2)
+  const ambient = new THREE.AmbientLight(0xffffff, definition.viewer.ambientLightIntensity)
   scene.add(ambient)
   sceneObjects.push(ambient)
 
-  const dir = new THREE.DirectionalLight(0xffffff, 2.0)
+  const dir = new THREE.DirectionalLight(definition.primaryLight.color, definition.primaryLight.intensity)
   dir.position.set(4, 6, 2)
   scene.add(dir)
   sceneObjects.push(dir)
 
-  const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient()
+  const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient(definition.kernelPack)
 
   disposers.push(disposeSpice)
 
@@ -183,27 +179,8 @@ export async function initSpiceSceneRuntime(args: {
     disposers.push(disposeE2e)
   }
 
-  // Scene model driving the rendered scene.
-  // TODO(#119): Temporary special-case to always render Earth's Moon.
-  // Longer-term we should have user-configurable visibility + kernel-pack
-  // downloads for moons/satellites.
-  const moonEntry = getBodyRegistryEntry('MOON')
-  const sceneModel: SceneModel = {
-    frame: J2000_FRAME,
-    // Use a stable observer for all SPICE queries, then apply a precision
-    // strategy in the renderer (focus-origin rebasing).
-    observer: 'SUN',
-    bodies: [
-      ...listDefaultVisibleSceneBodies(),
-      {
-        body: moonEntry.body,
-        bodyFixedFrame: moonEntry.bodyFixedFrame,
-        style: moonEntry.style,
-      },
-    ],
-  }
-
-  const bodies = sceneModel.bodies.map((body) => {
+  const { frame, observer } = definition.coordinates
+  const bodies = definition.bodies.map((body) => {
     const registry = resolveBodyRegistryEntry(String(body.body)) ?? getBodyRegistryEntryByBodyRef(body.body)
     const bodyId = registry?.id
 
@@ -271,7 +248,7 @@ export async function initSpiceSceneRuntime(args: {
   const orbitPaths = new OrbitPaths({
     spice: cachedSpice,
     kmToWorld,
-    bodies: sceneModel.bodies.map((b) => ({ body: b.body, color: b.style.appearance.surface.color })),
+    bodies: definition.bodies.map((b) => ({ body: b.body, color: b.style.appearance.surface.color })),
   })
   sceneObjects.push(orbitPaths.object)
   disposers.push(() => orbitPaths.dispose())
@@ -351,15 +328,15 @@ export async function initSpiceSceneRuntime(args: {
     const statePromises = bodies.map((b) =>
       cachedSpice.kit.getState({
         target: String(b.body),
-        observer: String(sceneModel.observer),
+        observer: String(observer),
         at: etSec,
-        frame: sceneModel.frame,
+        frame,
       }),
     )
 
     const rotationPromises = bodies.map((b) =>
       b.bodyFixedFrame
-        ? cachedSpice.kit.frameTransform(b.bodyFixedFrame, sceneModel.frame, etSec).then((m) => m.toColMajor())
+        ? cachedSpice.kit.frameTransform(b.bodyFixedFrame, frame, etSec).then((m) => m.toColMajor())
         : Promise.resolve(undefined),
     )
 
@@ -474,9 +451,9 @@ export async function initSpiceSceneRuntime(args: {
       if (!focusPosKm) {
         const focusState = await cachedSpice.kit.getState({
           target: String(next.focusBody),
-          observer: String(sceneModel.observer),
+          observer: String(observer),
           at: next.etSec,
-          frame: sceneModel.frame,
+          frame,
         })
 
         if (isDisposed()) return

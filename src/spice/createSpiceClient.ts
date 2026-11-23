@@ -1,5 +1,7 @@
-import type { NaifKernelId, SpiceAsync } from '@rybosome/tspice'
-import { kernels, spiceClients } from '@rybosome/tspice'
+import type { KernelPack, SpiceAsync } from '@rybosome/tspice'
+import { spiceClients } from '@rybosome/tspice'
+
+import { resolveVitePublicUrl } from '../scene/resolveVitePublicUrl.js'
 
 export type ViewerSpiceClientBundle = {
   spice: SpiceAsync
@@ -11,25 +13,9 @@ export type ViewerSpiceClientBundle = {
 /**
  * Viewer entrypoint for initializing a worker-backed `SpiceAsync` client.
  */
-export async function createSpiceClient(): Promise<ViewerSpiceClientBundle> {
-  const runtimeBaseUrl = new URL(import.meta.env.BASE_URL, window.location.href)
-  const staticWasmUrl = new URL('static/backend-wasm/dist/tspice_backend_wasm.wasm', runtimeBaseUrl).toString()
-
-  const NAIF_KERNEL_IDS = [
-    'lsk/naif0012.tls',
-    'pck/pck00011.tpc',
-    'spk/planets/de432s.bsp',
-  ] as const satisfies readonly [NaifKernelId, ...NaifKernelId[]]
-
-  const pack = kernels
-    .naif({
-      origin: 'static/kernels/naif/',
-      // Important for apps deployed under a subpath (GitHub Pages, etc).
-      // Vite's BASE_URL is typically already directory-style (ends with '/').
-      baseUrl: import.meta.env.BASE_URL,
-      pathBase: 'naif/',
-    })
-    .pick(NAIF_KERNEL_IDS)
+export async function createSpiceClient(pack: KernelPack): Promise<ViewerSpiceClientBundle> {
+  const staticWasmUrl = resolveVitePublicUrl('static/backend-wasm/dist/tspice_backend_wasm.wasm')
+  const resolvedPack: KernelPack = { ...pack, baseUrl: resolveVitePublicUrl(pack.baseUrl ?? './') }
 
   const { spice, dispose: disposeAsync } = await spiceClients
     .caching({
@@ -39,7 +25,7 @@ export async function createSpiceClient(): Promise<ViewerSpiceClientBundle> {
       // sufficient. (TimeStore quantization also keeps the key space sane.)
       ttlMs: null,
     })
-    .withKernels(pack)
+    .withKernels(resolvedPack)
     .toWebWorker({ wasmUrl: staticWasmUrl })
 
   const dispose = (): void => {
