@@ -14,11 +14,12 @@ test('Sol boots focused on Earth with the original body roster and assets', asyn
     if (response.ok() && assetPaths.has(pathname)) servedAssets.add(pathname)
   })
 
-  await page.goto('/?e2e=1&et=1234567')
-  await page.waitForFunction(() => window.__tspice_viewer__rendered_scene === true)
+  await page.goto('/')
+  const expandControls = page.getByRole('button', { name: 'Expand controls' })
+  await expect(expandControls).toBeVisible()
   await expect.poll(() => servedAssets).toEqual(assetPaths)
 
-  await page.getByRole('button', { name: 'Expand controls' }).click()
+  await expandControls.click()
   await page.getByRole('tab', { name: 'GUIDES', exact: true }).click()
 
   const focus = page.getByRole('combobox')
