@@ -13,6 +13,7 @@ import { computeOrbitAnglesToKeepPointInView, isDirectionWithinFov } from './con
 import { HelpOverlay } from './ui/HelpOverlay.js'
 import { InfoOverlay } from './ui/InfoOverlay.js'
 import { SelectionInspector } from './ui/SelectionInspector.js'
+import { sampleBodyLighting } from './e2eHooks/bodyLightingProbe.js'
 import { markTspiceViewerRenderedScene } from './e2eHooks/index.js'
 import { installSceneInteractions, type SceneInteractions } from './interaction/installSceneInteractions.js'
 import { RenderHud, type RenderHudStats } from './renderer/RenderHud.js'
@@ -1455,6 +1456,18 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
           const api = window.__tspice_viewer__e2e
           if (!api) throw new Error('e2e API not initialized: __tspice_viewer__e2e')
 
+          if (import.meta.env.DEV) {
+            api.sampleBodyLighting = async (bodyId, focusId) => {
+              await runtime.updateScene(
+                { ...latestUiRef.current, etSec: timeStore.getState().etSec, focusBody: focusId },
+                { required: true },
+              )
+              const body = pickables.find((mesh) => mesh.userData.bodyId === bodyId)
+              const star = pickables.find((mesh) => mesh.userData.bodyId === definition.primaryLight.bodyId)
+              if (!body || !star) throw new Error('Lighting probe bodies are unavailable')
+              return sampleBodyLighting({ renderer: three.renderer, scene: three.scene, body, star })
+            }
+          }
           api.setCameraPreset = setCameraPreset
           api.lockDeterministicLighting = lockDeterministicLighting
           api.renderNTimes = renderNTimes
