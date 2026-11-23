@@ -79,7 +79,7 @@ const LABEL_PADDING_X = 8
 const LABEL_PADDING_Y = 4
 
 // Priority order for collision avoidance
-const KIND_PRIORITY: Record<BodyKind, number> = {
+const KIND_PRIORITY: Record<SceneBodyDefinition['kind'], number> = {
   star: 10,
   planet: 5,
   moon: 2,
@@ -338,7 +338,7 @@ export class LabelOverlay {
 
   private overlayDiv: HTMLDivElement
   private svgElement: SVGSVGElement
-  private labelStates: Map<BodyId, LabelState> = new Map()
+  private labelStates: Map<string, LabelState> = new Map()
 
   private raycaster = new THREE.Raycaster()
 
@@ -387,7 +387,7 @@ export class LabelOverlay {
     const height = this.container.clientHeight
 
     // Sync label state with bodies
-    const currentIds = new Set<BodyId>()
+    const currentIds = new Set<string>()
     for (const body of bodies) {
       currentIds.add(body.id)
 

@@ -21,11 +21,16 @@ describe('scene orbit guides', () => {
   })
 
   it('samples a guide relative to a hidden center and keeps endpoint samples within coverage', async () => {
-    const getState = vi
-      .fn<SpiceAsync['kit']['getState']>()
-      .mockResolvedValue({ position: [1, 2, 3], velocity: [0, 0, 0], lightTime: 0 } as Awaited<
-        ReturnType<SpiceAsync['kit']['getState']>
-      >)
+    const getState = vi.fn<SpiceAsync['kit']['getState']>().mockImplementation(async (query) => ({
+      et: query.at,
+      frame: query.frame ?? 'J2000',
+      target: String(query.target),
+      observer: String(query.observer),
+      aberration: 'NONE',
+      position: [1, 2, 3],
+      velocity: [0, 0, 0],
+      lightTime: 0,
+    }))
     const spice = { kit: { getState } } as unknown as SpiceAsync
     const invalidate = vi.fn()
     const orbits = new OrbitPaths({
