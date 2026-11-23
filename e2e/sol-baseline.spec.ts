@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+test.use({ viewport: { width: 900, height: 650 } })
+
 test('Sol boots focused on Earth with the original body roster and assets', async ({ page }) => {
   const assetPaths = new Set([
     '/static/backend-wasm/dist/tspice_backend_wasm.wasm',
@@ -16,7 +18,9 @@ test('Sol boots focused on Earth with the original body roster and assets', asyn
 
   await page.goto('/')
   const expandControls = page.getByRole('button', { name: 'Expand controls' })
-  await expect(expandControls).toBeVisible()
+  const startupError = page.getByRole('alert')
+  await expect(expandControls.or(startupError)).toBeVisible({ timeout: 25_000 })
+  await expect(startupError).toHaveCount(0)
   await expect.poll(() => servedAssets).toEqual(assetPaths)
 
   await expandControls.click()
