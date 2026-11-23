@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { SpiceAsync } from '@rybosome/tspice'
-import { timeStore, useTimeStore } from '../time/timeStore.js'
+import { useTimeStore, type TimeStore } from '../time/timeStore.js'
 
 interface PlaybackControlsProps {
+  timeStore: TimeStore
   spice: SpiceAsync
   /**
    * Provides a zoom-dependent default rate (sim seconds per wall-clock second)
@@ -50,8 +51,8 @@ function formatRateShort(rate: number): string {
 const PAUSE_ICON = '⏸\uFE0E'
 
 /** Time playback and scrub controls (UTC/ET display + rate controls). */
-export function PlaybackControls({ spice, getDefaultResumeRateSecPerSec }: PlaybackControlsProps) {
-  const state = useTimeStore()
+export function PlaybackControls({ spice, timeStore, getDefaultResumeRateSecPerSec }: PlaybackControlsProps) {
+  const state = useTimeStore(timeStore)
 
   const [utcString, setUtcString] = useState<string>('…')
 
@@ -76,9 +77,12 @@ export function PlaybackControls({ spice, getDefaultResumeRateSecPerSec }: Playb
     return `${state.etSec.toFixed(1)}s`
   }, [state.etSec])
 
-  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    timeStore.setEtSec(Number(e.target.value))
-  }, [])
+  const handleSliderChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      timeStore.setEtSec(Number(e.target.value))
+    },
+    [timeStore],
+  )
 
   const isPlaying = state.rateSecPerSec !== 0
   const isReverse = state.rateSecPerSec < 0

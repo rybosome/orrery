@@ -12,6 +12,8 @@ export function installTspiceViewerE2eApi(args: { isE2e: boolean; spice: SpiceAs
   window.__tspice_viewer__rendered_scene = false
 
   window.__tspice_viewer__e2e = {
+    utcToEt: (utc) => args.spice.kit.utcToEt(utc),
+    getPosition: (query) => args.spice.kit.getState(query).then((state) => state.position),
     getFrameTransform: ({ from, to, et }) => args.spice.kit.frameTransform(from, to, et).then((m) => m.toColMajor()),
   }
 

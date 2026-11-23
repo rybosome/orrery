@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { timeStore, useTimeStoreSelector } from './timeStore.js'
+import { useTimeStoreSelector, type TimeStore } from './timeStore.js'
 
 /**
  * Fixed timestep for simulation ticks (seconds).
@@ -24,14 +24,14 @@ const MAX_TICKS_PER_FRAME = 10
  *
  * This ensures deterministic time progression regardless of frame rate.
  */
-export function usePlaybackTicker(): void {
-  const rate = useTimeStoreSelector((s) => s.rateSecPerSec)
+export function usePlaybackTicker(timeStore: TimeStore, ready: boolean): void {
+  const rate = useTimeStoreSelector(timeStore, (s) => s.rateSecPerSec)
   const accumulatorRef = useRef(0)
   const lastTimeRef = useRef<number | null>(null)
 
   useEffect(() => {
     // Only run the ticker when we have a non-zero rate
-    if (rate === 0) {
+    if (!ready || rate === 0) {
       lastTimeRef.current = null
       accumulatorRef.current = 0
       return
@@ -89,5 +89,5 @@ export function usePlaybackTicker(): void {
         cancelAnimationFrame(frameId)
       }
     }
-  }, [rate])
+  }, [rate, ready, timeStore])
 }

@@ -11,14 +11,14 @@ import { computeBodyRadiusWorld } from '../bodyScaling.js'
 import { createFrameAxes, mat3ToMatrix4 } from '../FrameAxes.js'
 import { OrbitPaths } from '../orbits/OrbitPaths.js'
 import { rebasePositionKm } from '../precision.js'
-import { clearTextureCache } from '../loadTextureCached.js'
 import type { SceneDefinition } from '../../scenes/sceneDefinition.js'
 import { LabelOverlay, type LabelBody, type LabelOverlayUpdateOptions } from '../../labels/LabelOverlay.js'
-import { timeStore } from '../../time/timeStore.js'
+import type { TimeStore } from '../../time/timeStore.js'
 import { computeViewerScrubRangeEt } from '../../time/viewerTimeBounds.js'
 import { installTspiceViewerE2eApi } from '../../e2eHooks/index.js'
 import type { CameraController, CameraControllerState } from '../../controls/CameraController.js'
 import { shouldAutoZoomOnFocusChange } from './focusAutoZoom.js'
+import { createSceneResources } from './sceneResources.js'
 
 const SUN_BODY_ID: BodyId = 'SUN'
 
@@ -55,20 +55,19 @@ export type SceneUiState = {
 
 export type SpiceSceneRuntime = {
   spice: SpiceAsync
-  updateScene: (next: SceneUiState) => Promise<void>
+  updateScene: (next: SceneUiState, options?: { required?: boolean }) => Promise<void>
   afterRender: () => void
   onDrawingBufferResize: (bufferSize: { width: number; height: number }) => void
   dispose: () => void
   pickables: THREE.Mesh[]
 }
 
-/**
- * Initialize the SPICE-backed scene runtime (kernel loading, body meshes, orbit paths, labels, etc).
- */
-export async function initSpiceSceneRuntime(args: {
+type SpiceSceneRuntimeOptions = {
   definition: SceneDefinition
   isE2e: boolean
   initialEt: number | null
+  timeStore: TimeStore
+  signal: AbortSignal
 
   scene: THREE.Scene
   camera: THREE.PerspectiveCamera
@@ -77,9 +76,6 @@ export async function initSpiceSceneRuntime(args: {
 
   /** Populated with body meshes for picking (shared with interaction + labels). */
   pickables: THREE.Mesh[]
-
-  /** Called as soon as the (cached) SpiceAsync client is ready. */
-  onSpiceClientLoaded?: (spice: SpiceAsync) => void
 
   kmToWorld: number
   sunOcclusionMarginRad: number
@@ -105,20 +101,34 @@ export async function initSpiceSceneRuntime(args: {
   selectedBodyIdRef: { current: BodyId | undefined }
 
   invalidate: () => void
+}
 
-  /** Used to abort init if the React effect unmounts mid-async. */
-  isDisposed: () => boolean
-}): Promise<SpiceSceneRuntime> {
+/** Initialize SPICE and the scene objects, with cleanup on failure or cancellation. */
+export async function initSpiceSceneRuntime(args: SpiceSceneRuntimeOptions): Promise<SpiceSceneRuntime> {
+  const resources = createSceneResources(args.signal)
+  try {
+    return await buildSceneRuntime(args, resources)
+  } catch (error) {
+    resources.dispose()
+    throw error
+  }
+}
+
+async function buildSceneRuntime(
+  args: SpiceSceneRuntimeOptions,
+  resources: ReturnType<typeof createSceneResources>,
+): Promise<SpiceSceneRuntime> {
   const {
     definition,
     isE2e,
     initialEt,
+    timeStore,
+    signal,
     scene,
     camera,
     controller,
     container,
     pickables,
-    onSpiceClientLoaded,
     kmToWorld,
     sunOcclusionMarginRad,
     computeFocusRadius,
@@ -130,12 +140,16 @@ export async function initSpiceSceneRuntime(args: {
     skipAutoZoomForNextFocusBodyRef,
     selectedBodyIdRef,
     invalidate,
-    isDisposed,
   } = args
 
   // Resource cleanup list
   const sceneObjects: THREE.Object3D[] = []
-  const disposers: Array<() => void> = []
+  const isDisposed = () => resources.disposed
+  resources.add(() => {
+    for (const object of sceneObjects) scene.remove(object)
+    pickables.length = 0
+  })
+  signal.throwIfAborted()
 
   // Lighting (owned by the scene runtime)
   const ambient = new THREE.AmbientLight(0xffffff, definition.viewer.ambientLightIntensity)
@@ -149,35 +163,13 @@ export async function initSpiceSceneRuntime(args: {
 
   const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient(definition.kernelPack)
 
-  disposers.push(disposeSpice)
+  resources.add(disposeSpice)
+  signal.throwIfAborted()
 
-  onSpiceClientLoaded?.(cachedSpice)
-
-  if (isDisposed()) {
-    // Best-effort cleanup of any scene-owned objects created so far.
-    for (const obj of sceneObjects) scene.remove(obj)
-    for (const dispose of disposers) dispose()
-    clearTextureCache({ force: true })
-    throw new Error('SceneCanvas disposed during SPICE init')
-  }
-
-  // IMPORTANT: set the viewer's scrub range only after kernels load so
-  // `spice.kit.utcToEt` (SPICE `str2et`) is correct.
-  //
-  // Also: do this *before* applying any startup ET override, because
-  // `timeStore.setEtSec` clamps to the current scrub range.
-  const scrubRange = await computeViewerScrubRangeEt({ spice: cachedSpice })
-  if (scrubRange) timeStore.setScrubRange(scrubRange.minEtSec, scrubRange.maxEtSec)
-
-  // Optional e2e-only initial ET override from runtime config.
-  if (initialEt != null) {
-    if (!isDisposed()) timeStore.setEtSec(initialEt)
-  }
-
-  if (!isDisposed()) {
-    const disposeE2e = installTspiceViewerE2eApi({ isE2e, spice: cachedSpice })
-    disposers.push(disposeE2e)
-  }
+  const bounds = await computeViewerScrubRangeEt({ spice: cachedSpice, time: definition.time })
+  signal.throwIfAborted()
+  timeStore.initializeBounds(bounds, initialEt ?? definition.time.initialEtSec)
+  resources.add(installTspiceViewerE2eApi({ isE2e, spice: cachedSpice }))
 
   const { frame, observer } = definition.coordinates
   const bodies = definition.bodies.map((body) => {
@@ -199,7 +191,7 @@ export async function initSpiceSceneRuntime(args: {
 
     pickables.push(mesh)
     sceneObjects.push(mesh)
-    disposers.push(dispose)
+    resources.add(dispose)
     scene.add(mesh)
 
     const axes = !isE2e && body.bodyFixedFrame ? createFrameAxes({ sizeWorld: 0.45, opacity: 0.9 }) : undefined
@@ -207,7 +199,7 @@ export async function initSpiceSceneRuntime(args: {
     if (axes) {
       axes.object.visible = false
       sceneObjects.push(axes.object)
-      disposers.push(axes.dispose)
+      resources.add(axes.dispose)
       scene.add(axes.object)
     }
 
@@ -237,12 +229,7 @@ export async function initSpiceSceneRuntime(args: {
   // Ensure textures are loaded before we mark the scene as rendered.
   await Promise.all(bodies.map((b) => b.ready))
 
-  if (isDisposed()) {
-    for (const obj of sceneObjects) scene.remove(obj)
-    for (const dispose of disposers) dispose()
-    clearTextureCache({ force: true })
-    throw new Error('SceneCanvas disposed during scene asset init')
-  }
+  signal.throwIfAborted()
 
   // Orbit paths (one full orbital period per body).
   const orbitPaths = new OrbitPaths({
@@ -251,14 +238,14 @@ export async function initSpiceSceneRuntime(args: {
     bodies: definition.bodies.map((b) => ({ body: b.body, color: b.style.appearance.surface.color })),
   })
   sceneObjects.push(orbitPaths.object)
-  disposers.push(() => orbitPaths.dispose())
+  resources.add(() => orbitPaths.dispose())
   scene.add(orbitPaths.object)
 
   const j2000Axes = !isE2e ? createFrameAxes({ sizeWorld: 1.2, opacity: 0.9 }) : undefined
   if (j2000Axes) {
     j2000Axes.object.visible = false
     sceneObjects.push(j2000Axes.object)
-    disposers.push(j2000Axes.dispose)
+    resources.add(j2000Axes.dispose)
     scene.add(j2000Axes.object)
   }
 
@@ -271,7 +258,7 @@ export async function initSpiceSceneRuntime(args: {
       kmToWorld,
     })
 
-    disposers.push(() => {
+    resources.add(() => {
       labelOverlay?.dispose()
       labelOverlay = null
     })
@@ -358,7 +345,7 @@ export async function initSpiceSceneRuntime(args: {
 
   const ORBIT_MIN_POINTS_PER_ORBIT = 32
 
-  const updateScene = async (next: SceneUiState): Promise<void> => {
+  const updateScene: SpiceSceneRuntime['updateScene'] = async (next, { required = false } = {}) => {
     const token = ++sceneUpdateToken
 
     try {
@@ -678,7 +665,8 @@ export async function initSpiceSceneRuntime(args: {
 
       invalidate()
     } catch (err) {
-      // Prevent unhandled rejections when callers don't await (timeStore subscriptions).
+      if (isDisposed()) return
+      if (required) throw err
       console.warn('Scene update failed', err)
     }
   }
@@ -687,13 +675,9 @@ export async function initSpiceSceneRuntime(args: {
     orbitPaths?.setResolution(width, height)
   }
 
-  const dispose = () => {
+  resources.add(() => {
     latestLabelOverlayOptions = null
-
-    for (const obj of sceneObjects) scene.remove(obj)
-    for (const dispose of disposers) dispose()
-    clearTextureCache({ force: true })
-  }
+  })
 
   return {
     spice: cachedSpice,
@@ -701,6 +685,6 @@ export async function initSpiceSceneRuntime(args: {
     updateScene,
     afterRender,
     onDrawingBufferResize,
-    dispose,
+    dispose: resources.dispose,
   }
 }

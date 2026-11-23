@@ -4,11 +4,33 @@ import { J2000_FRAME } from '../spice/types.js'
 import {
   DEFAULT_RESUME_RATE_DAY_SEC_PER_SEC,
   DEFAULT_RESUME_RATE_HOUR_SEC_PER_SEC,
+  DEFAULT_RESUME_RATE_WEEK_SEC_PER_SEC,
 } from '../time/defaultPlaybackRate.js'
-import { DEFAULT_QUANTUM_SEC, DEFAULT_STEP_SEC, RATE_LADDER } from '../time/timeStore.js'
-import { VIEWER_SCRUB_UTC_HARD_MAX, VIEWER_SCRUB_UTC_HARD_MIN } from '../time/viewerTimeBounds.js'
 import type { SceneDefinition } from './sceneDefinition.js'
 import { SOL_BODIES } from './solBodies.js'
+
+/**
+ * Rate ladder (simulation seconds per wall-clock second).
+ * Includes both forward and reverse rates for easy cycling.
+ * Values are sorted from slowest reverse to fastest forward.
+ */
+export const RATE_LADDER = [
+  -86400 * 365, // -1 year/s (reverse)
+  -86400 * 30, // -1 month/s (reverse)
+  -86400 * 7, // -1 week/s (reverse)
+  -86400, // -1 day/s (reverse)
+  -3600, // -1 hour/s (reverse)
+  -60, // -1 minute/s (reverse)
+  -1, // -1x (reverse real-time)
+  0, // Paused
+  1, // 1x (real-time)
+  60, // 1 minute/s
+  3600, // 1 hour/s
+  86400, // 1 day/s
+  86400 * 7, // 1 week/s
+  86400 * 30, // 1 month/s
+  86400 * 365, // 1 year/s
+] as const
 
 /** The Solar System package shipped by the viewer. */
 export const SOL_SCENE = {
@@ -21,15 +43,16 @@ export const SOL_SCENE = {
   bodies: SOL_BODIES,
   primaryLight: { bodyId: 'SUN', color: '#ffffff', intensity: 2.1 },
   time: {
-    minUtc: VIEWER_SCRUB_UTC_HARD_MIN,
-    maxUtc: VIEWER_SCRUB_UTC_HARD_MAX,
+    minUtc: '1950-01-01T00:00:00Z',
+    maxUtc: '2050-01-01T23:58:00Z', // The SPK ends at Jan 2 00:00:00 TDB; UTC trails TDB by about 69 s.
     initialEtSec: 0,
-    quantumSec: DEFAULT_QUANTUM_SEC,
-    stepSec: DEFAULT_STEP_SEC,
+    quantumSec: 0.1,
+    stepSec: 60,
     rateLadder: RATE_LADDER,
     resumeRates: {
       closeSecPerSec: DEFAULT_RESUME_RATE_HOUR_SEC_PER_SEC,
       wideSecPerSec: DEFAULT_RESUME_RATE_DAY_SEC_PER_SEC,
+      maxSecPerSec: DEFAULT_RESUME_RATE_WEEK_SEC_PER_SEC,
     },
   },
   viewer: {

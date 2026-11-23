@@ -10,7 +10,7 @@ import {
   DEFAULT_SCRUB_MAX_ET_SEC,
   DEFAULT_SCRUB_MIN_ET_SEC,
   DEFAULT_STEP_SEC,
-} from '../time/timeStore.js'
+} from './v1TimeDefaults.js'
 
 export const SCENE_SNAPSHOT_SCHEMA_VERSION = 1 as const
 

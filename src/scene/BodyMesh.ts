@@ -589,9 +589,9 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
           }
         })
         .catch((err) => {
-          if (isTextureCacheClearedError(err)) return
+          if (disposed || isTextureCacheClearedError(err)) return
           // Keep rendering if a texture fails; surface failures for debugging.
-          console.warn('Failed to load body texture', textureUrl, err)
+          console.warn('Failed to load body texture', { bodyId: options.bodyId, url: textureUrl }, err)
         }),
     )
   }
@@ -620,8 +620,8 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
           }
         })
         .catch((err) => {
-          if (isTextureCacheClearedError(err)) return
-          console.warn('Failed to load body normal map', normalTextureUrl, err)
+          if (disposed || isTextureCacheClearedError(err)) return
+          console.warn('Failed to load body normal map', { bodyId: options.bodyId, url: normalTextureUrl }, err)
         }),
     )
   }
@@ -650,8 +650,8 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
           }
         })
         .catch((err) => {
-          if (isTextureCacheClearedError(err)) return
-          console.warn('Failed to load body roughness map', roughnessTextureUrl, err)
+          if (disposed || isTextureCacheClearedError(err)) return
+          console.warn('Failed to load body roughness map', { bodyId: options.bodyId, url: roughnessTextureUrl }, err)
         }),
     )
   }
@@ -1327,8 +1327,12 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
             }
           })
           .catch((err) => {
-            if (isTextureCacheClearedError(err)) return
-            console.warn('Failed to load Earth night lights texture', earth.nightLightsTextureUrl, err)
+            if (disposed || isTextureCacheClearedError(err)) return
+            console.warn(
+              'Failed to load Earth night lights texture',
+              { bodyId: options.bodyId, url: earth.nightLightsTextureUrl },
+              err,
+            )
           }),
       )
     }
@@ -1355,8 +1359,12 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
             }
           })
           .catch((err) => {
-            if (isTextureCacheClearedError(err)) return
-            console.warn('Failed to load Earth clouds texture', earth.cloudsTextureUrl, err)
+            if (disposed || isTextureCacheClearedError(err)) return
+            console.warn(
+              'Failed to load Earth clouds texture',
+              { bodyId: options.bodyId, url: earth.cloudsTextureUrl },
+              err,
+            )
           }),
       )
     }
@@ -1383,8 +1391,12 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
             }
           })
           .catch((err) => {
-            if (isTextureCacheClearedError(err)) return
-            console.warn('Failed to load Earth water mask texture', earth.waterMaskTextureUrl, err)
+            if (disposed || isTextureCacheClearedError(err)) return
+            console.warn(
+              'Failed to load Earth water mask texture',
+              { bodyId: options.bodyId, url: earth.waterMaskTextureUrl },
+              err,
+            )
           }),
       )
     }
