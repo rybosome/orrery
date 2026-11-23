@@ -37,3 +37,11 @@ Snapshots are stored alongside each spec in `*-snapshots/` directories.
   - `samplePerfCounters()` / `getLastPerfCounters()`
 
 These APIs are only installed in e2e mode and should not affect runtime visuals.
+
+## Hosted routes before the Sol migration
+
+On November 22, 2026, the production site opened the viewer at `/`. Both
+`/<v1 payload>` and `/s/<v1 payload>` restored the same Mars fixture on fresh
+navigation, with the original path still in the address bar. Opening `/sol`
+directly served the viewer and showed the invalid shared snapshot notice.
+These observations establish the baseline for the scene-prefixed route rollout.

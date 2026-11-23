@@ -21,10 +21,11 @@ jobs:
         pnpm run test
 
   orrery-e2e:
-    name: Orrery Playwright e2e (ubuntu + node 22)
+    name: Orrery Playwright e2e (Ubuntu 24.04 + Node 22)
     uses: ./.github/workflows/reusable-node-pnpm.yml
     with:
-      runs_on: ubuntu-latest
+      # The pinned Playwright version cannot install Chromium on Ubuntu 26.04.
+      runs_on: ubuntu-24.04
       node_version: '22'
       command: |
         set -euo pipefail
