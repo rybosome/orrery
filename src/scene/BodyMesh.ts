@@ -1113,7 +1113,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
       const markerWaterFactor = '// tspice:surface-effects:water-factor'
       const markerRoughness = '// tspice:surface-effects:ocean-roughness'
       const markerGlint = '// tspice:surface-effects:ocean-glint'
-      const water = safeShaderReplaceAllInSource({
+      const waterPatch = safeShaderReplaceAllInSource({
         src: nextFrag,
         source: 'fragmentShader',
         warnOnce,
@@ -1182,8 +1182,8 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
         ],
       })
 
-      if (water.ok) {
-        nextFrag = water.next
+      if (waterPatch.ok) {
+        nextFrag = waterPatch.next
       }
 
       const shaderSources: ShaderSource = shader
