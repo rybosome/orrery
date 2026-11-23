@@ -8,11 +8,10 @@ import {
 } from '../time/defaultPlaybackRate.js'
 import type { SceneDefinition } from './sceneDefinition.js'
 import { SOL_BODIES } from './solBodies.js'
-import { getHomePresetStateForKey, HOME_PRESET_KEYS } from './solHomePresets.js'
+import { SOL_HOME_POSES } from './solHomePresets.js'
 import { SOLAR_SCALE_CAMERA_STATE } from './solScalePresets.js'
 
-const homePoses = new Map(HOME_PRESET_KEYS.map((id) => [id, getHomePresetStateForKey(id)] as const))
-const homeRadii = [...homePoses.values()].map((pose) => pose.radius)
+const homeRadii = [...SOL_HOME_POSES.values()].map((pose) => pose.radius)
 
 /**
  * Rate ladder (simulation seconds per wall-clock second).
@@ -63,7 +62,7 @@ export const SOL_SCENE = {
   viewer: {
     initialFocusId: 'EARTH',
     cameraFovDeg: 50,
-    homePoses,
+    homePoses: SOL_HOME_POSES,
     scalePresets: {
       planetary: { focusId: 'EARTH', planetMultiplier: 1, starMultiplier: 1 },
       solar: { focusId: 'SUN', planetMultiplier: 800, starMultiplier: 12, cameraPose: SOLAR_SCALE_CAMERA_STATE },

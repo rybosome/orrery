@@ -15,6 +15,8 @@ From repo root:
 - `pnpm install`
 - `pnpm run dev`
 
+Most scene content is declared in TypeScript. See [Scene authoring](docs/scene-authoring.md) for the Sol package, asset paths, and validation steps.
+
 ## NAIF kernels
 
 This viewer ships a small set of **NAIF Generic Kernels** as static assets under `public/static/kernels/naif/`:
@@ -68,14 +70,14 @@ Tune this depending on camera near/far planes, desired look, and precision.
 
 WebGL vertices end up in 32-bit float space; solar-system-scale positions (e.g. 1 AU in km) lose fine detail when used directly as world coordinates.
 
-- Query body positions in a stable inertial frame (`J2000`) relative to a stable observer (we use `SUN`).
+- Query body positions in the scene’s declared frame and relative to its observer. Sol uses `J2000` and `SUN`.
 - Pick a **focus target** (defaults to Earth).
 - Each update, compute delta between body and focus position.
 - Convert delta into renderer units and assign to Three.js object positions.
 
 ### Frame transforms
 
-`SpiceClient.getFrameTransform({ from, to, et })` returns a `Mat3` rotation matrix.
+`spice.kit.frameTransform(from, to, et)` returns a rotation matrix. Call `.toColMajor()` to obtain a `Mat3`.
 
 - Representation: a flat `number[9]` in **column-major** order to match Three.js `Matrix3`.
 - Indexing:

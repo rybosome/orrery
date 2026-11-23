@@ -1,50 +1,4 @@
-import type { FrameId, KernelPackId } from '../spice/types.js'
-
 import type { SceneBodyDefinition } from './sceneDefinition.js'
-
-export type BodyId =
-  | 'SUN'
-  | 'MERCURY'
-  | 'VENUS'
-  | 'EARTH'
-  | 'MARS'
-  | 'JUPITER'
-  | 'SATURN'
-  | 'URANUS'
-  | 'NEPTUNE'
-  | 'MOON'
-
-export type BodyKind = 'star' | 'planet' | 'moon'
-
-export type NaifIds = {
-  /** The NAIF body ID (e.g. Earth=399, Jupiter=599). */
-  body: number
-  /** Optional NAIF barycenter ID for ephemeris kernels that provide barycenters instead. */
-  barycenter?: number
-}
-
-/**
- * Registry entry describing a renderable body and its SPICE/visual metadata.
- */
-export interface BodyRegistryEntry extends SceneBodyDefinition {
-  id: BodyId
-
-  /** Optional parent reference for moons (and potentially rings/spacecraft later). */
-  parentId?: BodyId
-
-  /**
-   * Hook for future behavior: some bodies won't render without additional kernel packs.
-   *
-   * (No runtime behavior changes yet; this is just metadata.)
-   */
-  requiresKernelPack?: boolean
-
-  /** The kernel pack required by this body (if any). */
-  kernelPackId?: KernelPackId
-
-  /** Optional body-fixed frame for debug axes (e.g. `"IAU_EARTH"`). */
-  bodyFixedFrame?: FrameId
-}
 
 const DAY_SEC = 86_400
 
@@ -58,7 +12,7 @@ function orbitGuide(periodDays: number, center = 'SUN'): NonNullable<SceneBodyDe
   }
 }
 
-export const SOL_BODIES: readonly BodyRegistryEntry[] = [
+export const SOL_BODIES: readonly SceneBodyDefinition[] = [
   {
     id: 'SUN',
     body: 'SUN',
@@ -352,10 +306,6 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
     body: 'MOON',
     naifIds: { body: 301 },
     kind: 'moon',
-    parentId: 'EARTH',
-    requiresKernelPack: true,
-    // Non-baseline: moons are intended to be download/opt-in later.
-    kernelPackId: 'moon-default',
     bodyFixedFrame: 'IAU_MOON',
     style: {
       radiusKm: 1_737.4,

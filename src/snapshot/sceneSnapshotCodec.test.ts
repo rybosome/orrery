@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_SCRUB_MAX_ET_SEC, DEFAULT_SCRUB_MIN_ET_SEC } from './v1TimeDefaults.js'
 import { createDefaultSceneSnapshotV1 } from './sceneSnapshot.js'
-import { decodeSnapshot, encodeSnapshot } from './sceneSnapshotCodec.js'
+import { decodeSnapshot } from './sceneSnapshotCodec.js'
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = ''
@@ -23,43 +23,6 @@ function encodeRawPayload(value: unknown): string {
 }
 
 describe('sceneSnapshotCodec', () => {
-  it('produces deterministic roundtrip payloads', () => {
-    const snapshot = {
-      ...createDefaultSceneSnapshotV1(),
-      focusBody: 'MARS',
-      player: {
-        ...createDefaultSceneSnapshotV1().player,
-        etSec: 123.4,
-        rateSecPerSec: -3600,
-        playing: true,
-        direction: 'reverse' as const,
-      },
-      scale: {
-        ...createDefaultSceneSnapshotV1().scale,
-        cameraFovDeg: 65,
-        sunScaleMultiplier: 12,
-        planetScaleMultiplier: 32,
-      },
-    }
-
-    const payloadA = encodeSnapshot(snapshot)
-    const payloadB = encodeSnapshot(snapshot)
-
-    expect(payloadA).toBe(payloadB)
-    expect(payloadA).toMatch(/^[A-Za-z0-9_-]+$/)
-
-    const decoded = decodeSnapshot(payloadA)
-    expect(decoded.ok).toBe(true)
-
-    if (!decoded.ok) throw new Error('expected decode success')
-
-    expect(encodeSnapshot(decoded.snapshot)).toBe(payloadA)
-    expect(decoded.snapshot.focusBody).toBe('MARS')
-    expect(decoded.snapshot.player.rateSecPerSec).toBe(-3600)
-    expect(decoded.snapshot.player.direction).toBe('reverse')
-    expect(decoded.snapshot.player.playing).toBe(true)
-  })
-
   it('returns structured errors for malformed payloads', () => {
     const invalidCharacters = decodeSnapshot('@@@')
     expect(invalidCharacters.ok).toBe(false)

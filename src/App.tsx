@@ -1,5 +1,6 @@
 import './App.css'
 import { SceneCanvas } from './SceneCanvas'
+import { DEFAULT_SCENE } from './scenes/sceneCatalog.js'
 import { buildScenePath, canonicalHomePath, resolveSceneRoute } from './scenes/sceneRoute.js'
 import { createSolTestScene } from './e2eHooks/solTestScene.js'
 
@@ -27,7 +28,7 @@ function App() {
         ) : (
           <section className="sceneRouteError">
             <h2>Unknown scene</h2>
-            <a href={buildScenePath('sol', import.meta.env.BASE_URL)}>Open the Solar System</a>
+            <a href={buildScenePath(DEFAULT_SCENE.id, import.meta.env.BASE_URL)}>Open the Solar System</a>
           </section>
         )}
       </main>

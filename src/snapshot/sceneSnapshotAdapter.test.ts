@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { applySnapshot } from './sceneSnapshotAdapter.js'
+import { applySnapshotView } from './sceneSnapshotAdapter.js'
 import { createDefaultSceneSnapshotV1 } from './sceneSnapshot.js'
 
-describe('sceneSnapshotAdapter.applySnapshot', () => {
+describe('sceneSnapshotAdapter.applySnapshotView', () => {
   it('applies snapshot phases in deterministic order', async () => {
     const snapshot = {
       ...createDefaultSceneSnapshotV1(),
@@ -19,7 +19,7 @@ describe('sceneSnapshotAdapter.applySnapshot', () => {
 
     const calls: string[] = []
 
-    const applied = await applySnapshot(snapshot, {
+    await applySnapshotView(snapshot, {
       cancelFocusTween: () => calls.push('cancelFocusTween'),
       setSkipAutoZoomForFocusBody: () => calls.push('setSkipAutoZoomForFocusBody'),
       applyScale: () => calls.push('applyScale'),
@@ -27,8 +27,14 @@ describe('sceneSnapshotAdapter.applySnapshot', () => {
       applyOrbitPaths: () => calls.push('applyOrbitPaths'),
       applySystem: () => calls.push('applySystem'),
       applyRendering: () => calls.push('applyRendering'),
-      applyFocusBody: () => calls.push('applyFocusBody'),
-      applyPlayer: () => calls.push('applyPlayer'),
+      applyFocusBody: (body) => {
+        expect(body).toBe('JUPITER')
+        calls.push('applyFocusBody')
+      },
+      applyPlayer: (player) => {
+        expect(player).toMatchObject({ etSec: 42, direction: 'forward' })
+        calls.push('applyPlayer')
+      },
       flushSceneUpdate: async () => {
         calls.push('flushSceneUpdate')
       },
@@ -48,9 +54,5 @@ describe('sceneSnapshotAdapter.applySnapshot', () => {
       'flushSceneUpdate',
       'applyCamera',
     ])
-
-    expect(applied.focusBody).toBe('JUPITER')
-    expect(applied.player.etSec).toBe(42)
-    expect(applied.player.direction).toBe('forward')
   })
 })

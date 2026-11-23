@@ -62,11 +62,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>
 }
 
-/** Encode a snapshot into a deterministic compressed base64url payload. */
-export function encodeSnapshot(snapshot: SceneSnapshotV1): string {
-  return encodeSnapshotDocument(normalizeSceneSnapshot(snapshot))
-}
-
 /** Compress a versioned snapshot document into its URL-safe representation. */
 export function encodeSnapshotDocument(document: object): string {
   const json = JSON.stringify(document)
