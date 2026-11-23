@@ -4,7 +4,7 @@ import type { SpiceAsync } from '@rybosome/tspice'
 import type { CameraController, CameraControllerState } from './controls/CameraController.js'
 import { useKeyboardControls } from './controls/useKeyboardControls.js'
 import { J2000_FRAME, type BodyRef, type EtSeconds } from './spice/types.js'
-import { getBodyRegistryEntry, listDefaultVisibleBodies, type BodyId } from './scene/BodyRegistry.js'
+import { getBodyRegistryEntry, type BodyId } from './scene/BodyRegistry.js'
 import { computeBodyRadiusWorld } from './scene/bodyScaling.js'
 import { timeStore, useTimeStoreSelector } from './time/timeStore.js'
 import { computeDefaultResumeRateSecPerSecForZoomSlider } from './time/defaultPlaybackRate.js'
@@ -30,6 +30,7 @@ import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRun
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
 import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/initSpiceSceneRuntime.js'
 import { isEarthAppearanceLayer } from './scene/SceneModel.js'
+import type { SceneDefinition } from './scenes/sceneDefinition.js'
 import { applySnapshot, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
 import { loadSnapshotFromPathnameAtBoot } from './snapshot/sceneSnapshotBoot.js'
 import {
@@ -269,7 +270,7 @@ const INVALID_SNAPSHOT_NOTICE = 'Invalid shared snapshot URL. Loaded default sce
 /**
  * Main Three.js scene canvas + runtime initializer for the orrery app.
  */
-export function SceneCanvas() {
+export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -306,7 +307,7 @@ export function SceneCanvas() {
     sunBloomResolutionScale,
   } = runtimeConfig
 
-  const [focusBody, setFocusBody] = useState<BodyRef>('EARTH')
+  const [focusBody, setFocusBody] = useState<BodyRef>(definition.viewer.initialFocusId)
   const [showJ2000Axes, setShowJ2000Axes] = useState(false)
   const [showBodyFixedAxes, setShowBodyFixedAxes] = useState(false)
   // Selected body (promoted from local closure variable for inspector panel)
@@ -342,7 +343,7 @@ export function SceneCanvas() {
     return { id: advancedPane, tabLabel: label, title: label, summary: '' }
   }, [advancedPane])
 
-  const [cameraFovDeg, setCameraFovDeg] = useState(50)
+  const [cameraFovDeg, setCameraFovDeg] = useState(definition.viewer.cameraFovDeg)
 
   const earthAppearanceDefaults = useMemo(() => {
     const layers = getBodyRegistryEntry('EARTH').style.appearance?.layers
@@ -350,11 +351,11 @@ export function SceneCanvas() {
   }, [])
 
   // Lighting + Sun appearance defaults.
-  const AMBIENT_LIGHT_INTENSITY_DEFAULT = 0.45
-  const SUN_LIGHT_INTENSITY_DEFAULT = 2.1
+  const AMBIENT_LIGHT_INTENSITY_DEFAULT = definition.viewer.ambientLightIntensity
+  const SUN_LIGHT_INTENSITY_DEFAULT = definition.primaryLight.intensity
   // Sun emissive is in addition to the base texture `kind: 'sun'`.
-  const SUN_EMISSIVE_INTENSITY_DEFAULT = 10
-  const SUN_EMISSIVE_COLOR_DEFAULT = '#ffcc55'
+  const SUN_EMISSIVE_INTENSITY_DEFAULT = definition.viewer.starEmission.intensity
+  const SUN_EMISSIVE_COLOR_DEFAULT = definition.viewer.starEmission.color
 
   const [ambientLightIntensity, setAmbientLightIntensity] = useState(AMBIENT_LIGHT_INTENSITY_DEFAULT)
   const [sunLightIntensity, setSunLightIntensity] = useState(SUN_LIGHT_INTENSITY_DEFAULT)
@@ -432,13 +433,7 @@ export function SceneCanvas() {
   const focusDistanceMultiplier = 4
   const sunOcclusionMarginRad = 0
 
-  const focusOptions = useMemo(() => {
-    // TODO(#119): Once moons are fully integrated into default visibility rules,
-    // this should probably become a dedicated helper (e.g. listFocusableBodies).
-    const base = listDefaultVisibleBodies()
-    const moon = getBodyRegistryEntry('MOON')
-    return base.some((b) => b.id === moon.id) ? base : [...base, moon]
-  }, [])
+  const focusOptions = definition.bodies
 
   // Keep renderer units consistent across the app. This matches the value used
   // inside the renderer effect.
@@ -447,6 +442,7 @@ export function SceneCanvas() {
   // The renderer/bootstrap `useEffect` is mounted once, so capture the initial
   // runtime config it needs without having to re-run on UI toggles.
   const initRuntimeConfigRef = useRef({
+    definition,
     isE2e,
     enableLogDepth,
     starSeed,
@@ -1234,7 +1230,7 @@ export function SceneCanvas() {
     const container = containerRef.current
     if (!canvas || !container) return
 
-    const { isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld } =
+    const { definition, isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld } =
       initRuntimeConfigRef.current
 
     let disposed = false
@@ -1349,6 +1345,7 @@ export function SceneCanvas() {
     void (async () => {
       try {
         const runtime = await initSpiceSceneRuntime({
+          definition,
           isE2e,
           initialEt,
           scene: three.scene,

@@ -1,5 +1,6 @@
 import './App.css'
 import { SceneCanvas } from './SceneCanvas'
+import { DEFAULT_SCENE } from './scenes/sceneCatalog.js'
 
 function App() {
   return (
@@ -7,7 +8,7 @@ function App() {
       {/* Visually-hidden heading for e2e smoke + accessibility. */}
       <h1 className="sr-only">Orrery</h1>
       <main className="main">
-        <SceneCanvas />
+        <SceneCanvas key={DEFAULT_SCENE.id} definition={DEFAULT_SCENE} />
       </main>
     </div>
   )
