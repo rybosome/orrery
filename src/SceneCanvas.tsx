@@ -394,7 +394,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   const [skyTwinkle, setSkyTwinkle] = useState(skyTwinkleDefault)
 
   const twinkleEnabled = skyTwinkle && !isE2e
-  const skyAnimationActive = (animatedSky || twinkleEnabled) && !isE2e
+  const skyAnimationActive = spiceClient != null && (animatedSky || twinkleEnabled) && !isE2e
 
   // Planet visual scale multiplier (applies to all non-Sun bodies, including the Moon).
   // Uses a log-scale slider so the range can go "absurdly" large without being fiddly.
