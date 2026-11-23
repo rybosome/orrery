@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type * as THREE from 'three'
 import type { CameraController, CameraControllerState } from './CameraController.js'
-import { timeStore } from '../time/timeStore.js'
+import type { TimeStore } from '../time/timeStore.js'
 
 /** Orbit step equivalent in radians (used to derive speed) */
 const ORBIT_STEP = 0.05
@@ -18,6 +18,7 @@ const ROLL_SPEED_RAD_PER_SEC = (Math.PI / 36) * 20 // ~100 deg/sec
  * Options for {@link useKeyboardControls}.
  */
 export interface KeyboardControlsOptions {
+  timeStore: TimeStore
   /** CameraController ref */
   controllerRef: React.RefObject<CameraController | null>
   /** Camera ref */
@@ -111,6 +112,7 @@ export function useKeyboardControls({
   resetControllerStateByBodyRef,
   focusBodyRef,
   getDefaultResumeRateSecPerSec,
+  timeStore,
   enabled = true,
 }: KeyboardControlsOptions) {
   // Keep refs to latest values to avoid stale closures
@@ -449,6 +451,7 @@ export function useKeyboardControls({
     }
   }, [
     enabled,
+    timeStore,
     controllerRef,
     cameraRef,
     canvasRef,

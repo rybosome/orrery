@@ -1,8 +1,10 @@
-import type { Mat3ColMajor } from '@rybosome/tspice'
+import type { Mat3ColMajor, Vec3 } from '@rybosome/tspice'
 
 declare global {
   interface Window {
     __tspice_viewer__e2e?: {
+      utcToEt: (utc: string) => Promise<number>
+      getPosition: (args: { target: string; observer: string; at: number; frame: string }) => Promise<Vec3>
       getFrameTransform: (args: { from: string; to: string; et: number }) => Promise<Mat3ColMajor>
 
       /**

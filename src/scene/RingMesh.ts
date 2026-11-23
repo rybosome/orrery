@@ -86,7 +86,7 @@ export function createRingMesh(options: CreateRingMeshOptions): {
           mapRelease = release
         })
         .catch((err) => {
-          if (isTextureCacheClearedError(err)) return
+          if (disposed || isTextureCacheClearedError(err)) return
           console.warn('Failed to load ring texture', options.textureUrl, err)
         })
     : Promise.resolve()

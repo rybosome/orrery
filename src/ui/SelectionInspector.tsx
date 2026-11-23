@@ -4,9 +4,10 @@ import type { BodyRef, FrameId } from '../spice/types.js'
 import { resolveBodyRegistryEntry, type BodyRegistryEntry } from '../scene/BodyRegistry.js'
 import { getApproxOrbitalPeriodSec } from '../scene/orbits/orbitalPeriods.js'
 import { getNaifExtras, type NaifExtras } from '../data/naifExtras.js'
-import { useTimeStoreSelector } from '../time/timeStore.js'
+import { useTimeStoreSelector, type TimeStore } from '../time/timeStore.js'
 
 interface SelectionInspectorProps {
+  timeStore: TimeStore
   selectedBody: BodyRef
   focusBody: BodyRef
   spice: SpiceAsync
@@ -216,7 +217,14 @@ function formatBodyKind(kind: string): string {
 }
 
 /** UI panel showing details and live SPICE state for the currently selected body. */
-export function SelectionInspector({ selectedBody, focusBody, spice, observer, frame }: SelectionInspectorProps) {
+export function SelectionInspector({
+  selectedBody,
+  focusBody,
+  spice,
+  observer,
+  frame,
+  timeStore,
+}: SelectionInspectorProps) {
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   type BodyInfo = {
@@ -237,7 +245,7 @@ export function SelectionInspector({ selectedBody, focusBody, spice, observer, f
   // Keeping the subscription here prevents the entire <SceneCanvas> tree from
   // re-rendering every animation frame when playback is running (which can feel
   // like taps/gestures are being "eaten" on mobile).
-  const etSec = useTimeStoreSelector((s) => s.etSec)
+  const etSec = useTimeStoreSelector(timeStore, (s) => s.etSec)
 
   const registryEntry = useMemo(() => findBodyRegistryEntry(selectedBody), [selectedBody])
   const focusRegistryEntry = useMemo(() => findBodyRegistryEntry(focusBody), [focusBody])

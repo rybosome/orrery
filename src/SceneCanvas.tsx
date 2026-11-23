@@ -3,10 +3,10 @@ import * as THREE from 'three'
 import type { SpiceAsync } from '@rybosome/tspice'
 import type { CameraController, CameraControllerState } from './controls/CameraController.js'
 import { useKeyboardControls } from './controls/useKeyboardControls.js'
-import { J2000_FRAME, type BodyRef, type EtSeconds } from './spice/types.js'
+import { J2000_FRAME, type BodyRef } from './spice/types.js'
 import { getBodyRegistryEntry, type BodyId } from './scene/BodyRegistry.js'
 import { computeBodyRadiusWorld } from './scene/bodyScaling.js'
-import { timeStore, useTimeStoreSelector } from './time/timeStore.js'
+import { createTimeStore, useTimeStoreSelector } from './time/timeStore.js'
 import { computeDefaultResumeRateSecPerSecForZoomSlider } from './time/defaultPlaybackRate.js'
 import { usePlaybackTicker } from './time/usePlaybackTicker.js'
 import { PlaybackControls } from './ui/PlaybackControls.js'
@@ -271,6 +271,9 @@ const INVALID_SNAPSHOT_NOTICE = 'Invalid shared snapshot URL. Loaded default sce
  * Main Three.js scene canvas + runtime initializer for the orrery app.
  */
 export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
+  const [timeStore] = useState(() => createTimeStore(definition.time))
+  const sceneReadyRef = useRef(false)
+  const [sceneStartupError, setSceneStartupError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -427,7 +430,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     return m.toExponential(1)
   }
 
-  const quantumSec = useTimeStoreSelector((s) => s.quantumSec)
+  const quantumSec = useTimeStoreSelector(timeStore, (s) => s.quantumSec)
 
   // Keep these baked-in for now (no user-facing tuning).
   const focusDistanceMultiplier = 4
@@ -501,12 +504,15 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   panModeEnabledRef.current = panModeEnabled
   lookModeEnabledRef.current = lookModeEnabled
 
-  const handleQuantumChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
-    const value = Number(e.target.value)
-    if (value > 0) {
-      timeStore.setQuantumSec(value)
-    }
-  }, [])
+  const handleQuantumChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const value = Number(e.target.value)
+      if (value > 0) {
+        timeStore.setQuantumSec(value)
+      }
+    },
+    [timeStore],
+  )
 
   // Camera zoom (controller.radius) exposed as a log-scale slider.
   // 0 = closest (zoom in), 100 = farthest (zoom out).
@@ -540,12 +546,12 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     const controller = controllerRef.current
     if (controller) {
       const slider = zoomSliderForRadius(controller.radius, controller.minRadius, controller.maxRadius)
-      return computeDefaultResumeRateSecPerSecForZoomSlider(slider)
+      return computeDefaultResumeRateSecPerSecForZoomSlider(slider, definition.time.resumeRates)
     }
 
     // Fallback: use the last-known slider UI state if the controller is not ready.
-    return computeDefaultResumeRateSecPerSecForZoomSlider(zoomSlider)
-  }, [zoomSlider, zoomSliderForRadius])
+    return computeDefaultResumeRateSecPerSecForZoomSlider(zoomSlider, definition.time.resumeRates)
+  }, [definition.time.resumeRates, zoomSlider, zoomSliderForRadius])
 
   useEffect(() => {
     if (!overlayOpen) return
@@ -697,6 +703,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
   // Enable keyboard controls (disabled in e2e mode)
   useKeyboardControls({
+    timeStore,
     controllerRef,
     cameraRef,
     canvasRef,
@@ -710,7 +717,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     focusBodyRef,
     toggleLabels: () => setLabelsEnabled((v) => !v),
     getDefaultResumeRateSecPerSec,
-    enabled: !isE2e,
+    enabled: !isE2e && spiceClient != null,
   })
   const refocusSun = async () => {
     const controller = controllerRef.current
@@ -827,38 +834,9 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   }
 
   // Start the playback ticker (handles time advancement)
-  usePlaybackTicker()
+  usePlaybackTicker(timeStore, spiceClient != null)
 
-  const updateSceneRef = useRef<
-    | ((next: {
-        etSec: EtSeconds
-        focusBody: BodyRef
-        showJ2000Axes: boolean
-        showBodyFixedAxes: boolean
-        cameraFovDeg: number
-        sunScaleMultiplier: number
-        planetScaleMultiplier: number
-
-        orbitLineWidthPx: number
-        orbitSamplesPerOrbit: number
-        orbitMaxTotalPoints: number
-        orbitPathsEnabled: boolean
-        labelsEnabled: boolean
-        labelOcclusionEnabled: boolean
-
-        ambientLightIntensity: number
-        sunLightIntensity: number
-        sunEmissiveIntensity: number
-        sunEmissiveColor: string
-
-        earthNightAlbedo: number
-        earthTwilight: number
-        earthNightLightsIntensity: number
-        earthAtmosphereIntensity: number
-        earthCloudsNightMultiplier: number
-      }) => void | Promise<void>)
-    | null
-  >(null)
+  const updateSceneRef = useRef<SpiceSceneRuntime['updateScene'] | null>(null)
 
   // The renderer/bootstrap `useEffect` is mounted once, so it needs a ref to
   // read the latest UI state when async init completes.
@@ -959,6 +937,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       },
     })
   }, [
+    timeStore,
     focusBody,
     cameraFovDeg,
     sunScaleMultiplier,
@@ -1081,47 +1060,47 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         },
 
         applyPlayer: (next) => {
-          timeStore.setScrubRange(next.scrubMinEtSec, next.scrubMaxEtSec)
-          timeStore.setQuantumSec(next.quantumSec)
-          timeStore.setStepSec(next.stepSec)
-          timeStore.setEtSec(next.etSec)
-          timeStore.setRate(next.rateSecPerSec)
+          timeStore.restoreTime(next)
         },
 
         flushSceneUpdate: async (next) => {
           const update = updateSceneRef.current
           if (!update) return
 
-          await update({
-            etSec: next.player.etSec,
-            focusBody: next.focusBody,
-            showJ2000Axes: next.guides.showJ2000Axes,
-            showBodyFixedAxes: next.guides.showBodyFixedAxes,
-            cameraFovDeg: next.scale.cameraFovDeg,
-            sunScaleMultiplier: next.scale.sunScaleMultiplier,
-            planetScaleMultiplier: next.scale.planetScaleMultiplier,
+          await update(
+            {
+              etSec: timeStore.getState().etSec,
+              focusBody: next.focusBody,
+              showJ2000Axes: next.guides.showJ2000Axes,
+              showBodyFixedAxes: next.guides.showBodyFixedAxes,
+              cameraFovDeg: next.scale.cameraFovDeg,
+              sunScaleMultiplier: next.scale.sunScaleMultiplier,
+              planetScaleMultiplier: next.scale.planetScaleMultiplier,
 
-            orbitLineWidthPx: next.orbitPaths.lineWidthPx,
-            orbitSamplesPerOrbit: next.orbitPaths.samplesPerOrbit,
-            orbitMaxTotalPoints: next.orbitPaths.maxTotalPoints,
-            orbitPathsEnabled: next.orbitPaths.enabled,
-            labelsEnabled: next.guides.labelsEnabled,
-            labelOcclusionEnabled: next.guides.labelOcclusionEnabled,
+              orbitLineWidthPx: next.orbitPaths.lineWidthPx,
+              orbitSamplesPerOrbit: next.orbitPaths.samplesPerOrbit,
+              orbitMaxTotalPoints: next.orbitPaths.maxTotalPoints,
+              orbitPathsEnabled: next.orbitPaths.enabled,
+              labelsEnabled: next.guides.labelsEnabled,
+              labelOcclusionEnabled: next.guides.labelOcclusionEnabled,
 
-            ambientLightIntensity: next.rendering.ambientLightIntensity,
-            sunLightIntensity: next.rendering.sunLightIntensity,
-            sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
-            sunEmissiveColor: next.rendering.sunEmissiveColor,
+              ambientLightIntensity: next.rendering.ambientLightIntensity,
+              sunLightIntensity: next.rendering.sunLightIntensity,
+              sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
+              sunEmissiveColor: next.rendering.sunEmissiveColor,
 
-            earthNightAlbedo,
-            earthTwilight,
-            earthNightLightsIntensity,
-            earthAtmosphereIntensity,
-            earthCloudsNightMultiplier,
-          })
+              earthNightAlbedo,
+              earthTwilight,
+              earthNightLightsIntensity,
+              earthAtmosphereIntensity,
+              earthCloudsNightMultiplier,
+            },
+            { required: !sceneReadyRef.current },
+          )
         },
 
         applyCamera: (nextCamera) => {
+          if (controllerRef.current !== controller) return
           controller.restore(snapshotCameraToControllerState(nextCamera))
           controller.applyToCamera(camera)
           setZoomSlider(zoomSliderForRadius(controller.radius, controller.minRadius, controller.maxRadius))
@@ -1130,6 +1109,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       })
     },
     [
+      timeStore,
       planetScaleSliderForMultiplier,
       earthNightAlbedo,
       earthTwilight,
@@ -1152,14 +1132,16 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   // Subscribe to time store changes and update the scene (without React rerenders)
   useEffect(() => {
     const unsubscribe = timeStore.subscribe(() => {
+      if (!sceneReadyRef.current) return
       const etSec = timeStore.getState().etSec
       updateSceneRef.current?.({ etSec, ...latestUiRef.current })
     })
     return unsubscribe
-  }, [])
+  }, [timeStore])
 
   // Update scene when UI state changes (focus, axes toggles, camera options)
   useEffect(() => {
+    if (!sceneReadyRef.current) return
     const etSec = timeStore.getState().etSec
     updateSceneRef.current?.({
       etSec,
@@ -1188,6 +1170,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       earthCloudsNightMultiplier,
     })
   }, [
+    timeStore,
     focusBody,
     showJ2000Axes,
     showBodyFixedAxes,
@@ -1233,7 +1216,13 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     const { definition, isE2e, enableLogDepth, starSeed, animatedSky, twinkleEnabled, initialEt, kmToWorld } =
       initRuntimeConfigRef.current
 
-    let disposed = false
+    const session = new AbortController()
+    const { signal } = session
+    const reportStartupError = (error: unknown) => {
+      const details = error instanceof Error ? error.message : String(error)
+      setSceneStartupError(`Could not load ${definition.title}. ${details}`)
+      console.error(`Scene "${definition.id}" startup failed`, error)
+    }
 
     const pickables: THREE.Mesh[] = []
 
@@ -1251,31 +1240,37 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       setStats: (next: RenderHudStats) => setHudStats(next),
     }
 
-    const three = createThreeRuntime({
-      canvas,
-      container,
-      isE2e,
-      enableLogDepth,
-      starSeed,
-      animatedSky,
-      twinkleEnabled,
-      sunPostprocess: {
-        mode: initRuntimeConfigRef.current.sunPostprocessMode,
-        exposure: initRuntimeConfigRef.current.sunExposure,
-        toneMap: initRuntimeConfigRef.current.sunToneMap,
-        bloom: {
-          threshold: initRuntimeConfigRef.current.sunBloomThreshold,
-          strength: initRuntimeConfigRef.current.sunBloomStrength,
-          radius: initRuntimeConfigRef.current.sunBloomRadius,
-          resolutionScale: initRuntimeConfigRef.current.sunBloomResolutionScale,
+    let three: ThreeRuntime
+    try {
+      three = createThreeRuntime({
+        canvas,
+        container,
+        isE2e,
+        enableLogDepth,
+        starSeed,
+        animatedSky,
+        twinkleEnabled,
+        sunPostprocess: {
+          mode: initRuntimeConfigRef.current.sunPostprocessMode,
+          exposure: initRuntimeConfigRef.current.sunExposure,
+          toneMap: initRuntimeConfigRef.current.sunToneMap,
+          bloom: {
+            threshold: initRuntimeConfigRef.current.sunBloomThreshold,
+            strength: initRuntimeConfigRef.current.sunBloomStrength,
+            radius: initRuntimeConfigRef.current.sunBloomRadius,
+            resolutionScale: initRuntimeConfigRef.current.sunBloomResolutionScale,
+          },
         },
-      },
-      skyAnimationActiveRef,
-      initialFocusBody: latestUiRef.current.focusBody,
-      initialCameraFovDeg: latestUiRef.current.cameraFovDeg,
-      getHomePresetState,
-      hud: () => hudApi,
-    })
+        skyAnimationActiveRef,
+        initialFocusBody: latestUiRef.current.focusBody,
+        initialCameraFovDeg: latestUiRef.current.cameraFovDeg,
+        getHomePresetState,
+        hud: () => hudApi,
+      })
+    } catch (error) {
+      reportStartupError(error)
+      return
+    }
 
     rendererRuntimeRef.current = three
     rendererRef.current = three.renderer
@@ -1323,7 +1318,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         selectionOverlay: three.selectionOverlay,
         panModeEnabledRef,
         lookModeEnabledRef,
-        isDisposed: () => disposed,
+        isDisposed: () => signal.aborted,
       })
 
       cancelFocusTween = interactions.cancelFocusTween
@@ -1348,14 +1343,13 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
           definition,
           isE2e,
           initialEt,
+          timeStore,
+          signal,
           scene: three.scene,
           camera: three.camera,
           controller: three.controller,
           container,
           pickables,
-          onSpiceClientLoaded: (client) => {
-            if (!disposed) setSpiceClient(client)
-          },
           kmToWorld,
           sunOcclusionMarginRad,
           computeFocusRadius,
@@ -1367,13 +1361,9 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
           skipAutoZoomForNextFocusBodyRef,
           selectedBodyIdRef,
           invalidate: three.invalidate,
-          isDisposed: () => disposed,
         })
 
-        if (disposed) {
-          runtime.dispose()
-          return
-        }
+        signal.throwIfAborted()
 
         spiceSceneRuntime = runtime
 
@@ -1384,14 +1374,11 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
         updateSceneRef.current = runtime.updateScene
 
-        // Initial render with current time store state
-        const initialEtSec = timeStore.getState().etSec
-        await runtime.updateScene({ etSec: initialEtSec, ...latestUiRef.current })
-
-        await loadSnapshotFromPathnameAtBoot({
+        const snapshotResult = await loadSnapshotFromPathnameAtBoot({
           pathname: window.location.pathname,
           applySnapshot: (snapshot) => applySceneSnapshotRef.current(snapshot),
           onInvalidPayload: ({ payload, errorCode, errorMessage }) => {
+            if (signal.aborted) return
             console.warn('SceneCanvas: invalid snapshot path payload at boot; falling back to defaults', {
               pathname: window.location.pathname,
               payload,
@@ -1401,6 +1388,12 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
             setBootSnapshotNotice(INVALID_SNAPSHOT_NOTICE)
           },
         })
+
+        signal.throwIfAborted()
+        if (snapshotResult.status !== 'applied') {
+          await runtime.updateScene({ etSec: timeStore.getState().etSec, ...latestUiRef.current }, { required: true })
+          signal.throwIfAborted()
+        }
 
         three.resize()
         three.controller.applyToCamera(three.camera)
@@ -1544,15 +1537,20 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         }
 
         // Signals to Playwright tests that the WebGL scene has been rendered.
+        sceneReadyRef.current = true
+        setSpiceClient(runtime.spice)
         markTspiceViewerRenderedScene({ isE2e })
-      } catch (err) {
-        // Surface initialization failures to the console so e2e tests can catch them.
-        if (!disposed) console.error(err)
+      } catch (error) {
+        if (signal.aborted) return
+        reportStartupError(error)
+        disposeSession()
       }
     })()
 
-    return () => {
-      disposed = true
+    const disposeSession = () => {
+      if (signal.aborted) return
+      sceneReadyRef.current = false
+      session.abort()
 
       spiceSceneRuntime?.dispose()
       spiceSceneRuntime = null
@@ -1575,7 +1573,8 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
       updateSceneRef.current = null
     }
-  }, [])
+    return disposeSession
+  }, [timeStore])
 
   // Swap the background elements in-place when toggled.
   useEffect(() => {
@@ -1913,6 +1912,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
                   >
                     {/* Playback controls: UTC/ET display, scrubber, buttons, rate */}
                     <PlaybackControls
+                      timeStore={timeStore}
                       spice={spiceClient}
                       getDefaultResumeRateSecPerSec={getDefaultResumeRateSecPerSec}
                     />
@@ -2331,6 +2331,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       {/* Selection Inspector - shows when a body is selected */}
       {!isE2e && selectedBody && spiceClient ? (
         <SelectionInspector
+          timeStore={timeStore}
           selectedBody={selectedBody}
           focusBody={focusBody}
           spice={spiceClient}
@@ -2338,6 +2339,12 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
           frame={J2000_FRAME}
         />
       ) : null}
+
+      {sceneStartupError && (
+        <div className="sceneBootNotice" role="alert">
+          {sceneStartupError}
+        </div>
+      )}
 
       {bootSnapshotNotice ? (
         <div className="sceneBootNotice" role="status" aria-live="polite">

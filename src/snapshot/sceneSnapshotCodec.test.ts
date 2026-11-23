@@ -1,7 +1,7 @@
 import { deflateSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_SCRUB_MAX_ET_SEC, DEFAULT_SCRUB_MIN_ET_SEC } from '../time/timeStore.js'
+import { DEFAULT_SCRUB_MAX_ET_SEC, DEFAULT_SCRUB_MIN_ET_SEC } from './v1TimeDefaults.js'
 import { createDefaultSceneSnapshotV1 } from './sceneSnapshot.js'
 import { decodeSnapshot, encodeSnapshot } from './sceneSnapshotCodec.js'
 

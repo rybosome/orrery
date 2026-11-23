@@ -1,47 +1,6 @@
 import { useSyncExternalStore } from 'react'
+import type { SceneTimeDefinition } from '../scenes/sceneDefinition.js'
 import { quantizeEt } from './quantizeEt.js'
-import {
-  DEFAULT_RESUME_RATE_DAY_SEC_PER_SEC,
-  DEFAULT_RESUME_RATE_HOUR_SEC_PER_SEC,
-  DEFAULT_RESUME_RATE_WEEK_SEC_PER_SEC,
-} from './defaultPlaybackRate.js'
-
-/**
- * Default scrub window: 10 years from J2000 epoch (0 to ~10 years in seconds).
- * ET = 0 corresponds to 2000-01-01T12:00:00 TDB.
- */
-const SECONDS_PER_YEAR = 365.25 * 24 * 60 * 60
-export const DEFAULT_SCRUB_MIN_ET_SEC = 0
-export const DEFAULT_SCRUB_MAX_ET_SEC = 10 * SECONDS_PER_YEAR // ~315,576,000 seconds
-
-/** Default quantum for ET quantization (0.1 seconds = 100ms). */
-export const DEFAULT_QUANTUM_SEC = 0.1
-
-/** Default step size for step forward/back (60 seconds). */
-export const DEFAULT_STEP_SEC = 60
-
-/**
- * Rate ladder (simulation seconds per wall-clock second).
- * Includes both forward and reverse rates for easy cycling.
- * Values are sorted from slowest reverse to fastest forward.
- */
-export const RATE_LADDER = [
-  -86400 * 365, // -1 year/s (reverse)
-  -86400 * 30, // -1 month/s (reverse)
-  -86400 * 7, // -1 week/s (reverse)
-  -86400, // -1 day/s (reverse)
-  -3600, // -1 hour/s (reverse)
-  -60, // -1 minute/s (reverse)
-  -1, // -1x (reverse real-time)
-  0, // Paused
-  1, // 1x (real-time)
-  60, // 1 minute/s
-  3600, // 1 hour/s
-  86400, // 1 day/s
-  86400 * 7, // 1 week/s
-  86400 * 30, // 1 month/s
-  86400 * 365, // 1 year/s
-] as const
 
 /** External-store snapshot describing the current playback/scrub time state. */
 export interface TimeState {
@@ -61,15 +20,30 @@ export interface TimeState {
 
 type Listener = () => void
 
-function createTimeStore() {
+type TimeBounds = { minEtSec: number; maxEtSec: number }
+
+/** Return the nearest tick in range, preserving the exact endpoints. */
+export function quantizeBoundedEt(etSec: number, quantumSec: number, bounds: TimeBounds): number {
+  const { minEtSec, maxEtSec } = bounds
+  if (etSec <= minEtSec) return minEtSec
+  if (etSec >= maxEtSec) return maxEtSec
+  return Math.max(minEtSec, Math.min(maxEtSec, quantizeEt(etSec, quantumSec)))
+}
+
+/** Own time, playback, and hard coverage bounds for one viewer session. */
+export function createTimeStore(config: SceneTimeDefinition) {
   let state: TimeState = {
-    etSec: 0,
+    etSec: config.initialEtSec,
     rateSecPerSec: 0, // Paused by default
-    quantumSec: DEFAULT_QUANTUM_SEC,
-    stepSec: DEFAULT_STEP_SEC,
-    scrubMinEtSec: DEFAULT_SCRUB_MIN_ET_SEC,
-    scrubMaxEtSec: DEFAULT_SCRUB_MAX_ET_SEC,
+    quantumSec: config.quantumSec,
+    stepSec: config.stepSec,
+    scrubMinEtSec: config.initialEtSec,
+    scrubMaxEtSec: config.initialEtSec,
   }
+
+  let hardBounds: TimeBounds = { minEtSec: config.initialEtSec, maxEtSec: config.initialEtSec }
+  let playbackEtSec = config.initialEtSec
+  const { rateLadder, resumeRates } = config
 
   const listeners = new Set<Listener>()
 
@@ -93,57 +67,66 @@ function createTimeStore() {
     return () => listeners.delete(listener)
   }
 
-  // Actions
+  const scrubBounds = (): TimeBounds => ({ minEtSec: state.scrubMinEtSec, maxEtSec: state.scrubMaxEtSec })
+
   const setEtSec = (etSec: number) => {
-    const clamped = Math.max(state.scrubMinEtSec, Math.min(state.scrubMaxEtSec, etSec))
-    const quantized = quantizeEt(clamped, state.quantumSec)
-    if (quantized !== state.etSec) {
-      setState({ etSec: quantized })
-    }
+    if (!Number.isFinite(etSec)) return
+    const boundedEt = quantizeBoundedEt(etSec, state.quantumSec, scrubBounds())
+    playbackEtSec = boundedEt
+    if (boundedEt !== state.etSec) setState({ etSec: boundedEt })
   }
 
   const setRate = (rate: number) => {
-    if (rate !== state.rateSecPerSec) {
-      setState({ rateSecPerSec: rate })
-    }
+    if (Number.isFinite(rate) && rate !== state.rateSecPerSec) setState({ rateSecPerSec: rate })
   }
 
   const setQuantumSec = (quantumSec: number) => {
-    if (quantumSec > 0 && quantumSec !== state.quantumSec) {
-      const quantized = quantizeEt(state.etSec, quantumSec)
-      setState({ quantumSec, etSec: quantized })
+    if (Number.isFinite(quantumSec) && quantumSec > 0 && quantumSec !== state.quantumSec) {
+      const etSec = quantizeBoundedEt(state.etSec, quantumSec, scrubBounds())
+      playbackEtSec = etSec
+      setState({ quantumSec, etSec })
     }
   }
 
   const setStepSec = (stepSec: number) => {
-    if (stepSec > 0 && stepSec !== state.stepSec) {
-      setState({ stepSec })
-    }
+    if (Number.isFinite(stepSec) && stepSec > 0 && stepSec !== state.stepSec) setState({ stepSec })
   }
 
-  const setScrubRange = (min: number, max: number) => {
-    if (min < max) {
-      const clampedEt = Math.max(min, Math.min(max, state.etSec))
-      setState({
-        scrubMinEtSec: min,
-        scrubMaxEtSec: max,
-        etSec: quantizeEt(clampedEt, state.quantumSec),
-      })
-    }
+  const initializeBounds = (bounds: TimeBounds, initialEtSec = config.initialEtSec) => {
+    hardBounds = bounds
+    const etSec = quantizeBoundedEt(initialEtSec, config.quantumSec, bounds)
+    playbackEtSec = etSec
+    setState({
+      scrubMinEtSec: bounds.minEtSec,
+      scrubMaxEtSec: bounds.maxEtSec,
+      etSec,
+      rateSecPerSec: 0,
+      quantumSec: config.quantumSec,
+      stepSec: config.stepSec,
+    })
   }
 
-  const DEFAULT_RESUME_RATE_SEC_PER_SEC = DEFAULT_RESUME_RATE_DAY_SEC_PER_SEC
-  const MIN_RESUME_RATE_SEC_PER_SEC = DEFAULT_RESUME_RATE_HOUR_SEC_PER_SEC
-  const MAX_RESUME_RATE_SEC_PER_SEC = DEFAULT_RESUME_RATE_WEEK_SEC_PER_SEC
+  const restoreTime = (saved: TimeState) => {
+    const minEtSec = Math.max(saved.scrubMinEtSec, hardBounds.minEtSec)
+    const maxEtSec = Math.min(saved.scrubMaxEtSec, hardBounds.maxEtSec)
+    const intersects = minEtSec < maxEtSec
+    const bounds = intersects ? { minEtSec, maxEtSec } : hardBounds
+    const etSec = quantizeBoundedEt(intersects ? saved.etSec : config.initialEtSec, saved.quantumSec, bounds)
+    playbackEtSec = etSec
+    setState({
+      etSec,
+      scrubMinEtSec: bounds.minEtSec,
+      scrubMaxEtSec: bounds.maxEtSec,
+      rateSecPerSec: saved.rateSecPerSec,
+      quantumSec: saved.quantumSec,
+      stepSec: saved.stepSec,
+    })
+  }
 
-  const resolveDefaultResumeRateSecPerSec = (defaultResumeRateSecPerSec: number | undefined): number => {
-    // `defaultResumeRateSecPerSec` is expected to be a positive value.
-    // Treat <= 0 (and non-finite) as invalid, then clamp to a reasonable UX range.
-    if (defaultResumeRateSecPerSec == null) return DEFAULT_RESUME_RATE_SEC_PER_SEC
-    if (!Number.isFinite(defaultResumeRateSecPerSec) || defaultResumeRateSecPerSec <= 0)
-      return DEFAULT_RESUME_RATE_SEC_PER_SEC
-
-    return Math.max(MIN_RESUME_RATE_SEC_PER_SEC, Math.min(MAX_RESUME_RATE_SEC_PER_SEC, defaultResumeRateSecPerSec))
+  const resolveDefaultResumeRateSecPerSec = (defaultRate?: number): number => {
+    if (defaultRate == null || !Number.isFinite(defaultRate) || defaultRate <= 0) return resumeRates.wideSecPerSec
+    const min = Math.min(resumeRates.closeSecPerSec, resumeRates.wideSecPerSec)
+    return Math.max(min, Math.min(resumeRates.maxSecPerSec, defaultRate))
   }
 
   const play = (defaultResumeRateSecPerSec?: number) => {
@@ -176,9 +159,9 @@ function createTimeStore() {
    * If at the fastest forward rate, stays there.
    */
   const faster = () => {
-    const currentIdx = findClosestRateIndex(state.rateSecPerSec)
-    const nextIdx = Math.min(currentIdx + 1, RATE_LADDER.length - 1)
-    setRate(RATE_LADDER[nextIdx])
+    const currentIdx = findClosestRateIndex(state.rateSecPerSec, rateLadder)
+    const nextIdx = Math.min(currentIdx + 1, rateLadder.length - 1)
+    setRate(rateLadder[nextIdx])
   }
 
   /**
@@ -186,9 +169,9 @@ function createTimeStore() {
    * If at the slowest (most negative) rate, stays there.
    */
   const slower = () => {
-    const currentIdx = findClosestRateIndex(state.rateSecPerSec)
+    const currentIdx = findClosestRateIndex(state.rateSecPerSec, rateLadder)
     const nextIdx = Math.max(currentIdx - 1, 0)
-    setRate(RATE_LADDER[nextIdx])
+    setRate(rateLadder[nextIdx])
   }
 
   /**
@@ -220,12 +203,11 @@ function createTimeStore() {
    * This method quantizes the result.
    */
   const advanceTime = (deltaSec: number) => {
-    const nextEt = state.etSec + deltaSec
-    const clamped = Math.max(state.scrubMinEtSec, Math.min(state.scrubMaxEtSec, nextEt))
-    const quantized = quantizeEt(clamped, state.quantumSec)
-    if (quantized !== state.etSec) {
-      setState({ etSec: quantized })
-    }
+    if (!Number.isFinite(deltaSec)) return
+    const { minEtSec, maxEtSec } = scrubBounds()
+    playbackEtSec = Math.max(minEtSec, Math.min(maxEtSec, playbackEtSec + deltaSec))
+    const etSec = quantizeBoundedEt(playbackEtSec, state.quantumSec, { minEtSec, maxEtSec })
+    if (etSec !== state.etSec) setState({ etSec })
   }
 
   return {
@@ -239,7 +221,8 @@ function createTimeStore() {
     setRate,
     setQuantumSec,
     setStepSec,
-    setScrubRange,
+    initializeBounds,
+    restoreTime,
     play,
     pause,
     togglePlay,
@@ -257,12 +240,12 @@ function createTimeStore() {
 /**
  * Find the index of the closest rate in the ladder.
  */
-function findClosestRateIndex(rate: number): number {
+function findClosestRateIndex(rate: number, rateLadder: readonly number[]): number {
   let closestIdx = 0
-  let closestDist = Math.abs(rate - RATE_LADDER[0])
+  let closestDist = Math.abs(rate - rateLadder[0])
 
-  for (let i = 1; i < RATE_LADDER.length; i++) {
-    const dist = Math.abs(rate - RATE_LADDER[i])
+  for (let i = 1; i < rateLadder.length; i++) {
+    const dist = Math.abs(rate - rateLadder[i])
     if (dist < closestDist) {
       closestDist = dist
       closestIdx = i
@@ -271,14 +254,13 @@ function findClosestRateIndex(rate: number): number {
   return closestIdx
 }
 
-// Singleton store instance
-export const timeStore = createTimeStore()
+export type TimeStore = ReturnType<typeof createTimeStore>
 
 /**
  * React hook to use the time store.
  * Re-renders when any state changes.
  */
-export function useTimeStore(): TimeState {
+export function useTimeStore(timeStore: TimeStore): TimeState {
   return useSyncExternalStore(timeStore.subscribe, timeStore.getSnapshot, timeStore.getServerSnapshot)
 }
 
@@ -286,7 +268,7 @@ export function useTimeStore(): TimeState {
  * React hook to subscribe to a specific slice of the time store.
  * Only re-renders when the selected value changes.
  */
-export function useTimeStoreSelector<T>(selector: (state: TimeState) => T): T {
+export function useTimeStoreSelector<T>(timeStore: TimeStore, selector: (state: TimeState) => T): T {
   return useSyncExternalStore(
     timeStore.subscribe,
     () => selector(timeStore.getSnapshot()),

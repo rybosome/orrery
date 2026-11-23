@@ -1,36 +1,30 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { computeViewerScrubRangeEt, VIEWER_SCRUB_UTC_HARD_MAX, VIEWER_SCRUB_UTC_HARD_MIN } from './viewerTimeBounds.js'
+import { computeViewerScrubRangeEt } from './viewerTimeBounds.js'
+
+const time = { minUtc: '2026-01-01T00:00:00Z', maxUtc: '2026-01-02T00:00:00Z' }
 
 describe('viewerTimeBounds', () => {
-  it('converts the hard UTC endpoints to ET and returns them', async () => {
-    const utcToEt = async (utc: string) => {
-      if (utc === VIEWER_SCRUB_UTC_HARD_MIN) return 0
-      if (utc === VIEWER_SCRUB_UTC_HARD_MAX) return 100
-      throw new Error(`unexpected utc: ${utc}`)
-    }
-
-    const range = await computeViewerScrubRangeEt({ spice: { kit: { utcToEt } } })
-    expect(range).not.toBeNull()
-    expect(range?.minEtSec).toBe(0)
-    expect(range?.maxEtSec).toBe(100)
+  it('converts the scene endpoints to ET with the loaded kernel client', async () => {
+    const utcToEt = vi.fn<(utc: string) => Promise<number>>().mockResolvedValueOnce(1.23).mockResolvedValueOnce(100.56)
+    await expect(computeViewerScrubRangeEt({ spice: { kit: { utcToEt } }, time })).resolves.toEqual({
+      minEtSec: 1.23,
+      maxEtSec: 100.56,
+    })
+    expect(utcToEt.mock.calls).toEqual([[time.minUtc], [time.maxUtc]])
   })
 
-  it('returns null if utcToEt throws', async () => {
-    const utcToEt = async () => {
-      throw new Error('boom')
-    }
-
-    expect(await computeViewerScrubRangeEt({ spice: { kit: { utcToEt } } })).toBeNull()
+  it('surfaces failed kernel conversions', async () => {
+    const utcToEt = vi.fn().mockRejectedValue(new Error('missing leap seconds kernel'))
+    await expect(computeViewerScrubRangeEt({ spice: { kit: { utcToEt } }, time })).rejects.toThrow(
+      'missing leap seconds kernel',
+    )
   })
 
-  it('returns null if utcToEt produces an invalid range', async () => {
-    const utcToEt = async (utc: string) => {
-      if (utc === VIEWER_SCRUB_UTC_HARD_MIN) return 100
-      if (utc === VIEWER_SCRUB_UTC_HARD_MAX) return 100
-      throw new Error(`unexpected utc: ${utc}`)
-    }
-
-    expect(await computeViewerScrubRangeEt({ spice: { kit: { utcToEt } } })).toBeNull()
+  it('rejects a collapsed ET interval', async () => {
+    const utcToEt = async () => 100
+    await expect(computeViewerScrubRangeEt({ spice: { kit: { utcToEt } }, time })).rejects.toThrow(
+      'increasing ET interval',
+    )
   })
 })

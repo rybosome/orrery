@@ -18,7 +18,7 @@ export interface SceneTimeDefinition {
   quantumSec: number
   stepSec: number
   rateLadder: readonly number[]
-  resumeRates: { closeSecPerSec: number; wideSecPerSec: number }
+  resumeRates: { closeSecPerSec: number; wideSecPerSec: number; maxSecPerSec: number }
 }
 
 /** The kernels, bodies, and viewer defaults deployed together as a scene. */
@@ -102,7 +102,13 @@ export function validateSceneDefinition(scene: SceneDefinition): void {
   ) {
     fail('Playback rates must be finite, increasing, and include zero')
   }
-  if (!isPositive(time.resumeRates.closeSecPerSec) || !isPositive(time.resumeRates.wideSecPerSec)) {
+  const { closeSecPerSec, wideSecPerSec, maxSecPerSec } = time.resumeRates
+  if (
+    !isPositive(closeSecPerSec) ||
+    !isPositive(wideSecPerSec) ||
+    !isPositive(maxSecPerSec) ||
+    maxSecPerSec < Math.max(closeSecPerSec, wideSecPerSec)
+  ) {
     fail('Invalid playback resume rates')
   }
 
