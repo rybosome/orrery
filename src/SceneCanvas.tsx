@@ -19,7 +19,6 @@ import { RenderHud, type RenderHudStats } from './renderer/RenderHud.js'
 import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRuntime.js'
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
 import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/initSpiceSceneRuntime.js'
-import { isEarthAppearanceLayer } from './scene/SceneModel.js'
 import type { SceneDefinition } from './scenes/sceneDefinition.js'
 import { applySnapshot, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
 import { resolveSolV1Focus } from './snapshot/solV1Focus.js'
@@ -327,27 +326,17 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
   const [cameraFovDeg, setCameraFovDeg] = useState(definition.viewer.cameraFovDeg)
 
-  const earthAppearanceDefaults = useMemo(() => {
-    const layers = bodiesById.get('EARTH')?.style.appearance.layers
-    return layers?.find(isEarthAppearanceLayer)?.earth
-  }, [bodiesById])
-
   // Lighting + Sun appearance defaults.
   const AMBIENT_LIGHT_INTENSITY_DEFAULT = definition.viewer.ambientLightIntensity
   const SUN_LIGHT_INTENSITY_DEFAULT = definition.primaryLight.intensity
   // Sun emissive is in addition to the base texture `kind: 'sun'`.
-  const SUN_EMISSIVE_INTENSITY_DEFAULT = definition.viewer.starEmission.intensity
-  const SUN_EMISSIVE_COLOR_DEFAULT = definition.viewer.starEmission.color
+  const SUN_EMISSIVE_INTENSITY_DEFAULT = bodiesById.get(starId)?.style.appearance.emission?.intensity ?? 0
+  const SUN_EMISSIVE_COLOR_DEFAULT = bodiesById.get(starId)?.style.appearance.emission?.color ?? '#000000'
 
   const [ambientLightIntensity, setAmbientLightIntensity] = useState(AMBIENT_LIGHT_INTENSITY_DEFAULT)
   const [sunLightIntensity, setSunLightIntensity] = useState(SUN_LIGHT_INTENSITY_DEFAULT)
   const [sunEmissiveIntensity, setSunEmissiveIntensity] = useState(SUN_EMISSIVE_INTENSITY_DEFAULT)
   const [sunEmissiveColor, setSunEmissiveColor] = useState(SUN_EMISSIVE_COLOR_DEFAULT)
-  const earthNightAlbedo = 0.004
-  const earthTwilight = earthAppearanceDefaults?.nightLightsTwilight ?? 0.12
-  const earthNightLightsIntensity = earthAppearanceDefaults?.nightLightsIntensity ?? 1.25
-  const earthAtmosphereIntensity = earthAppearanceDefaults?.atmosphereIntensity ?? 0.55
-  const earthCloudsNightMultiplier = 0.0
 
   // Render HUD toggle (ephemeral, not persisted)
   const [showRenderHud, setShowRenderHud] = useState(false)
@@ -799,11 +788,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     sunLightIntensity,
     sunEmissiveIntensity,
     sunEmissiveColor,
-    earthNightAlbedo,
-    earthTwilight,
-    earthNightLightsIntensity,
-    earthAtmosphereIntensity,
-    earthCloudsNightMultiplier,
   })
   latestUiRef.current = {
     focusBody,
@@ -825,11 +809,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     sunLightIntensity,
     sunEmissiveIntensity,
     sunEmissiveColor,
-    earthNightAlbedo,
-    earthTwilight,
-    earthNightLightsIntensity,
-    earthAtmosphereIntensity,
-    earthCloudsNightMultiplier,
   }
 
   const captureSceneSnapshot = useCallback((): SceneSnapshotV1 | null => {
@@ -1032,12 +1011,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
                 sunLightIntensity: next.rendering.sunLightIntensity,
                 sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
                 sunEmissiveColor: next.rendering.sunEmissiveColor,
-
-                earthNightAlbedo,
-                earthTwilight,
-                earthNightLightsIntensity,
-                earthAtmosphereIntensity,
-                earthCloudsNightMultiplier,
               },
               { required: !sceneReadyRef.current },
             )
@@ -1053,18 +1026,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         },
       )
     },
-    [
-      timeStore,
-      definition,
-      bodiesById,
-      planetScaleSliderForMultiplier,
-      earthNightAlbedo,
-      earthTwilight,
-      earthNightLightsIntensity,
-      earthAtmosphereIntensity,
-      earthCloudsNightMultiplier,
-      zoomSliderForRadius,
-    ],
+    [timeStore, definition, bodiesById, planetScaleSliderForMultiplier, zoomSliderForRadius],
   )
 
   applySceneSnapshotRef.current = applySceneSnapshot
@@ -1110,11 +1072,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       sunLightIntensity,
       sunEmissiveIntensity,
       sunEmissiveColor,
-      earthNightAlbedo,
-      earthTwilight,
-      earthNightLightsIntensity,
-      earthAtmosphereIntensity,
-      earthCloudsNightMultiplier,
     })
   }, [
     timeStore,
@@ -1135,11 +1092,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     sunLightIntensity,
     sunEmissiveIntensity,
     sunEmissiveColor,
-    earthNightAlbedo,
-    earthTwilight,
-    earthNightLightsIntensity,
-    earthAtmosphereIntensity,
-    earthCloudsNightMultiplier,
   ])
 
   // Imperatively update camera FOV when the slider changes

@@ -49,7 +49,6 @@ export interface SceneDefinition {
     >
     radiusLimits: { minRadius: number; maxRadius: number }
     ambientLightIntensity: number
-    starEmission: { intensity: number; color: string }
   }
 }
 
@@ -76,6 +75,14 @@ export function validateSceneDefinition(scene: SceneDefinition): void {
     if (!body.id.trim() || body.id !== body.id.trim() || bodies.has(body.id))
       fail(`Invalid or duplicate body ID "${body.id}"`)
     if (!isPositive(body.style.radiusKm)) fail(`Invalid radius for "${body.id}"`)
+    const { textureLongitudeOffsetRad, emission } = body.style.appearance
+    if (textureLongitudeOffsetRad != null && !Number.isFinite(textureLongitudeOffsetRad)) {
+      fail(`Invalid texture longitude offset for "${body.id}"`)
+    }
+    if (emission && (!emission.color.trim() || !isNonNegative(emission.intensity))) {
+      fail(`Invalid surface emission for "${body.id}"`)
+    }
+
     if (
       body.orbitGuide &&
       (!isPositive(body.orbitGuide.spanSec) ||
@@ -107,13 +114,7 @@ export function validateSceneDefinition(scene: SceneDefinition): void {
   const { minRadius, maxRadius } = viewer.radiusLimits
   if (!isPositive(minRadius) || !isPositive(maxRadius) || minRadius >= maxRadius) fail('Invalid camera radius limits')
   if (!primaryLight.color.trim() || !isNonNegative(primaryLight.intensity)) fail('Invalid primary light')
-  if (
-    !isPositive(viewer.cameraFovDeg) ||
-    viewer.cameraFovDeg >= 180 ||
-    !isNonNegative(viewer.ambientLightIntensity) ||
-    !isNonNegative(viewer.starEmission.intensity) ||
-    !viewer.starEmission.color.trim()
-  ) {
+  if (!isPositive(viewer.cameraFovDeg) || viewer.cameraFovDeg >= 180 || !isNonNegative(viewer.ambientLightIntensity)) {
     fail('Invalid viewer defaults')
   }
 

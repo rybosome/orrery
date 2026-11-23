@@ -96,18 +96,14 @@ export interface BodySurfaceStyle {
   }
 }
 
-/** Layer style wrapper for the built-in Earth appearance model. */
-export interface EarthAppearanceLayerStyle {
-  kind: 'earth'
-  earth: EarthAppearanceStyle
-}
-
 /** Layer style for a generic atmosphere shell. */
 export interface AtmosphereAppearanceLayerStyle {
   kind: 'atmosphere'
   atmosphere: {
     /** Shell radius relative to the body radius. */
     radiusRatio?: number
+    /** Draw order for transparent shells. */
+    renderOrder?: number
     /** Additive glow color. */
     color?: string
     /** Opacity/intensity scalar (0..1-ish). */
@@ -150,23 +146,7 @@ export interface UnknownBodyLayerStyle {
 
 // Extensible: new layer kinds (atmosphere, clouds, decals, etc.) can be added later.
 // Keep this intentionally open, but structurally explicit.
-export type BodyLayerStyle =
-  | EarthAppearanceLayerStyle
-  | AtmosphereAppearanceLayerStyle
-  | AerosolAppearanceLayerStyle
-  | UnknownBodyLayerStyle
-
-/** Type guard for Earth appearance layers. */
-export function isEarthAppearanceLayer(layer: BodyLayerStyle): layer is EarthAppearanceLayerStyle {
-  if (typeof layer !== 'object' || layer === null) return false
-
-  const maybeKind = (layer as { kind?: unknown }).kind
-  if (maybeKind !== 'earth') return false
-
-  // Validate payload shape beyond `kind === 'earth'`.
-  const earth = (layer as { earth?: unknown }).earth
-  return typeof earth === 'object' && earth !== null
-}
+export type BodyLayerStyle = AtmosphereAppearanceLayerStyle | AerosolAppearanceLayerStyle | UnknownBodyLayerStyle
 
 /** Type guard for atmosphere appearance layers. */
 export function isAtmosphereAppearanceLayer(layer: BodyLayerStyle): layer is AtmosphereAppearanceLayerStyle {
@@ -194,41 +174,35 @@ export function isAerosolAppearanceLayer(layer: BodyLayerStyle): layer is Aeroso
 export interface BodyAppearanceStyle {
   surface: BodySurfaceStyle
 
+  /** Fixed right-handed rotation in radians around body-local +Z (north). */
+  textureLongitudeOffsetRad?: number
+
+  /** Emissive surface and optional selective bloom participation. */
+  emission?: { color: string; intensity: number; bloom?: boolean }
+
+  /** Emissive map masked to the night side. */
+  nightLights?: { textureUrl: string; intensity?: number; twilight?: number }
+
+  /** Cloud alpha map and shell settings. Drift is around body-local +Z per ET second. */
+  clouds?: {
+    textureUrl: string
+    radiusRatio?: number
+    opacity?: number
+    alphaTest?: number
+    driftRadPerSec?: number
+    nightMultiplier?: number
+    twilight?: number
+    alignWithSurface?: boolean
+  }
+
+  /** Water reflectance from an optional mask or an authored blue-albedo fallback. */
+  water?: { maskTextureUrl?: string; blueAlbedoFallback?: boolean; roughness?: number; specularIntensity?: number }
+
   /** Optional rings style (rendered as a child mesh). */
   rings?: SceneRingsStyle
 
   /** Optional additional layers (clouds, atmosphere, etc). */
   layers?: BodyLayerStyle[]
-}
-
-/** Extra Earth-specific appearance tunables (night lights, clouds, atmosphere, oceans). */
-export interface EarthAppearanceStyle {
-  /** Optional night lights (emissive) texture; should be equirectangular 2:1. */
-  nightLightsTextureUrl?: string
-  /** Optional clouds texture; used as an alpha map (bright=opaque). */
-  cloudsTextureUrl?: string
-  /** Optional water mask (1=water, 0=land); enables better specular/glint control. */
-  waterMaskTextureUrl?: string
-
-  nightLightsIntensity?: number
-  /** Smoothstep band around terminator for night lights, in N·L space (0..1-ish). */
-  nightLightsTwilight?: number
-
-  cloudsRadiusRatio?: number
-  cloudsOpacity?: number
-  cloudsAlphaTest?: number
-  /** Additional clouds rotation around local +Z (north), in rad/sec of ET. */
-  cloudsDriftRadPerSec?: number
-
-  atmosphereRadiusRatio?: number
-  atmosphereColor?: string
-  atmosphereIntensity?: number
-  atmosphereRimPower?: number
-  /** 0 = symmetric rim, 1 = fully sun-biased rim. */
-  atmosphereSunBias?: number
-
-  oceanRoughness?: number
-  oceanSpecularIntensity?: number
 }
 
 /** Ring rendering style (sizes relative to body radius + texture). */
@@ -263,9 +237,6 @@ export interface SceneBodyStyle {
 
   /** Optional label to show in UI. */
   label?: string
-
-  // NOTE: layers like Earth night-lights/clouds/atmosphere now live under
-  // `appearance.layers` (see `EarthAppearanceLayerStyle`).
 }
 
 /** Scene body entry linking a SPICE body ref to a renderer style. */
