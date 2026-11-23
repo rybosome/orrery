@@ -14,6 +14,8 @@ declare global {
        */
       setCameraPreset?: (preset: 'sun-close' | 'sun-medium' | 'sun-far') => void
 
+      sampleBodyLighting?: (bodyId: string, focusId: string) => Promise<{ dark: number; lit: number }>
+
       /** Lock lighting values used by golden images (ambient + sun light intensity). */
       lockDeterministicLighting?: () => void
 

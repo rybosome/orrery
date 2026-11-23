@@ -145,10 +145,11 @@ async function buildSceneRuntime(
   scene.add(ambient)
   sceneObjects.push(ambient)
 
-  const dir = new THREE.DirectionalLight(definition.primaryLight.color, definition.primaryLight.intensity)
-  dir.position.set(4, 6, 2)
-  scene.add(dir)
-  sceneObjects.push(dir)
+  // A constant-intensity point source aligns standard materials with the
+  // custom terminator shaders while keeping visual intensity scene-authored.
+  const light = new THREE.PointLight(definition.primaryLight.color, definition.primaryLight.intensity, 0, 0)
+  scene.add(light)
+  sceneObjects.push(light)
 
   const { spice: cachedSpice, dispose: disposeSpice } = await createSpiceClient(definition.kernelPack)
 
@@ -344,7 +345,7 @@ async function buildSceneRuntime(
 
       // Lighting knobs
       ambient.intensity = next.ambientLightIntensity
-      dir.intensity = next.sunLightIntensity
+      light.intensity = next.sunLightIntensity
 
       // Sun glow tuning.
       if (sunMaterial) {
@@ -618,18 +619,12 @@ async function buildSceneRuntime(
         }
       }
 
-      const sunDirVec = new THREE.Vector3(sunDirKm[0], sunDirKm[1], sunDirKm[2])
-      const sunDirLen2 = sunDirVec.lengthSq()
-      // Normalize and use as directional light position (fallback to +X+Y+Z if degenerate).
-      const dirPos = sunDirLen2 > 1e-12 ? sunDirVec.normalize() : new THREE.Vector3(1, 1, 1).normalize()
-      // TODO: Eclipse/shadow occlusion could be added here by checking if another body
-      // lies along the sun direction, but this adds complexity for marginal visual benefit.
-      dir.position.copy(dirPos.multiplyScalar(10))
-
-      // Update any body-specific shader uniforms using the same sun direction.
-      const sunDirWorld = dir.position.clone().normalize()
-      for (const b of bodies) {
-        b.update?.({ sunDirWorld, etSec: next.etSec })
+      light.position.set(...sunDirKm).multiplyScalar(kmToWorld)
+      const direction = new THREE.Vector3()
+      for (const body of bodies) {
+        if (!body.update || !body.lastState) continue
+        direction.set(...rebasePositionKm(starPosKm, body.lastState.position)).normalize()
+        body.update({ sunDirWorld: direction, etSec: next.etSec })
       }
 
       // Record label overlay inputs so we can update it on camera movement.
