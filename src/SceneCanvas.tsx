@@ -3,8 +3,6 @@ import * as THREE from 'three'
 import type { SpiceAsync } from '@rybosome/tspice'
 import type { CameraController, CameraControllerState } from './controls/CameraController.js'
 import { useKeyboardControls } from './controls/useKeyboardControls.js'
-import { J2000_FRAME, type BodyRef } from './spice/types.js'
-import { getBodyRegistryEntry, type BodyId } from './scene/BodyRegistry.js'
 import { computeBodyRadiusWorld } from './scene/bodyScaling.js'
 import { createTimeStore, useTimeStoreSelector } from './time/timeStore.js'
 import { computeDefaultResumeRateSecPerSecForZoomSlider } from './time/defaultPlaybackRate.js'
@@ -17,14 +15,6 @@ import { InfoOverlay } from './ui/InfoOverlay.js'
 import { SelectionInspector } from './ui/SelectionInspector.js'
 import { markTspiceViewerRenderedScene } from './e2eHooks/index.js'
 import { installSceneInteractions, type SceneInteractions } from './interaction/installSceneInteractions.js'
-import {
-  getHomePresetState,
-  getHomePresetStateForKey,
-  listHomePresetAliasesForKey,
-  HOME_PRESET_KEYS,
-  type HomePresetKey,
-} from './interaction/homePresets.js'
-import { SOLAR_SCALE_CAMERA_STATE } from './interaction/scalePresets.js'
 import { RenderHud, type RenderHudStats } from './renderer/RenderHud.js'
 import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRuntime.js'
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
@@ -32,6 +22,7 @@ import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/i
 import { isEarthAppearanceLayer } from './scene/SceneModel.js'
 import type { SceneDefinition } from './scenes/sceneDefinition.js'
 import { applySnapshot, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
+import { resolveSolV1Focus } from './snapshot/solV1Focus.js'
 import { loadSnapshotFromPathnameAtBoot } from './snapshot/sceneSnapshotBoot.js'
 import {
   buildSnapshotShareUrlForLocation,
@@ -246,20 +237,6 @@ function AdvancedHelpButton({
   )
 }
 
-const HOME_PRESET_RADII = HOME_PRESET_KEYS.map((k) => getHomePresetStateForKey(k).radius)
-const HOME_PRESET_RADIUS_MIN = Math.min(...HOME_PRESET_RADII)
-const HOME_PRESET_RADIUS_MAX = Math.max(...HOME_PRESET_RADII)
-
-// Shared camera zoom limits used across both the "planetary" and "solar" scale
-// presets.
-//
-// Keeping these consistent avoids partitioning the zoom spectrum (where changing
-// presets silently remaps wheel/pinch/slider sensitivity).
-const CAMERA_RADIUS_LIMITS = {
-  minRadius: HOME_PRESET_RADIUS_MIN * 0.25,
-  maxRadius: HOME_PRESET_RADIUS_MAX * 20_000,
-} as const
-
 type SceneSnapshotBindings = {
   captureSnapshot: () => SceneSnapshotV1 | null
   applySnapshot: (snapshot: SceneSnapshotV1) => Promise<SceneSnapshotV1>
@@ -271,6 +248,8 @@ const INVALID_SNAPSHOT_NOTICE = 'Invalid shared snapshot URL. Loaded default sce
  * Main Three.js scene canvas + runtime initializer for the orrery app.
  */
 export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
+  const bodiesById = useMemo(() => new Map(definition.bodies.map((body) => [body.id, body])), [definition])
+  const starId = definition.primaryLight.bodyId
   const [timeStore] = useState(() => createTimeStore(definition.time))
   const sceneReadyRef = useRef(false)
   const [sceneStartupError, setSceneStartupError] = useState<string | null>(null)
@@ -310,11 +289,11 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     sunBloomResolutionScale,
   } = runtimeConfig
 
-  const [focusBody, setFocusBody] = useState<BodyRef>(definition.viewer.initialFocusId)
+  const [focusBody, setFocusBody] = useState<string>(definition.viewer.initialFocusId)
   const [showJ2000Axes, setShowJ2000Axes] = useState(false)
   const [showBodyFixedAxes, setShowBodyFixedAxes] = useState(false)
   // Selected body (promoted from local closure variable for inspector panel)
-  const [selectedBody, setSelectedBody] = useState<BodyRef | null>(null)
+  const [selectedBody, setSelectedBody] = useState<string | null>(null)
   const [spiceClient, setSpiceClient] = useState<SpiceAsync | null>(null)
   const [bootSnapshotNotice, setBootSnapshotNotice] = useState<string | null>(null)
 
@@ -349,9 +328,9 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   const [cameraFovDeg, setCameraFovDeg] = useState(definition.viewer.cameraFovDeg)
 
   const earthAppearanceDefaults = useMemo(() => {
-    const layers = getBodyRegistryEntry('EARTH').style.appearance?.layers
+    const layers = bodiesById.get('EARTH')?.style.appearance.layers
     return layers?.find(isEarthAppearanceLayer)?.earth
-  }, [])
+  }, [bodiesById])
 
   // Lighting + Sun appearance defaults.
   const AMBIENT_LIGHT_INTENSITY_DEFAULT = definition.viewer.ambientLightIntensity
@@ -472,33 +451,17 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
   const panModeEnabledRef = useRef(panModeEnabled)
   const lookModeEnabledRef = useRef(lookModeEnabled)
   const focusOnOriginRef = useRef<(() => void) | null>(null)
-  const selectedBodyIdRef = useRef<BodyId | undefined>(undefined)
+  const selectedBodyIdRef = useRef<string | undefined>(undefined)
   const initialControllerStateRef = useRef<CameraControllerState | null>(null)
-  const skipAutoZoomForNextFocusBodyRef = useRef<BodyRef | null>(null)
+  const skipAutoZoomForNextFocusBodyRef = useRef<string | null>(null)
   const initialPlanetaryRadiusRef = useRef<number | null>(null)
 
   // Track current focus body for keyboard reset logic.
-  const focusBodyRef = useRef<BodyRef | null>(focusBody)
+  const focusBodyRef = useRef<string | null>(focusBody)
   focusBodyRef.current = focusBody
 
   // Per-body reset presets (used by keyboard Reset / R).
-  const resetControllerStateByBodyRef = useRef<Map<string, CameraControllerState> | null>(null)
-  if (!resetControllerStateByBodyRef.current) {
-    const next = new Map<string, CameraControllerState>()
-
-    const register = (key: HomePresetKey) => {
-      const preset = getHomePresetStateForKey(key)
-      for (const alias of listHomePresetAliasesForKey(key)) {
-        next.set(alias, preset)
-      }
-    }
-
-    for (const key of HOME_PRESET_KEYS) {
-      register(key)
-    }
-
-    resetControllerStateByBodyRef.current = next
-  }
+  const resetControllerStateByBodyRef = useRef(new Map(definition.viewer.homePoses))
   // Ref for resetting look offset (used by keyboard Escape and focus changes)
   const resetLookOffsetRef = useRef<(() => void) | null>(null)
   panModeEnabledRef.current = panModeEnabled
@@ -651,45 +614,23 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         zoomSliderRafRef.current = null
       }
 
-      if (preset === 'planetary') {
-        // True-ish scale.
-        setPlanetScaleSlider(planetScaleSliderForMultiplier(1))
-        setSunScaleMultiplier(1)
-      } else {
-        // Aggressive exaggeration for AU-scale viewing.
-        setPlanetScaleSlider(planetScaleSliderForMultiplier(800))
-        setSunScaleMultiplier(12)
-      }
+      const settings = definition.viewer.scalePresets[preset]
+      setPlanetScaleSlider(planetScaleSliderForMultiplier(settings.planetMultiplier))
+      setSunScaleMultiplier(settings.starMultiplier)
+      controller.setRadiusLimits(definition.viewer.radiusLimits)
+      setFocusBody(settings.focusId)
 
-      // Keep zoom limits consistent across presets so wheel/pinch/slider mapping
-      // stays predictable.
-      controller.setRadiusLimits(CAMERA_RADIUS_LIMITS)
-
-      if (preset === 'planetary') {
-        // The solar preset intentionally refocuses on the Sun; when switching back
-        // to planetary scale, return to the default Earth-centric view.
-        setFocusBody('EARTH')
-
-        // Return to the same zoom level as initial page load.
-        const initialRadius = initialPlanetaryRadiusRef.current
-        if (initialRadius != null) {
-          controller.radius = THREE.MathUtils.clamp(initialRadius, controller.minRadius, controller.maxRadius)
+      if (settings.cameraPose) {
+        if (focusBodyRef.current !== settings.focusId) {
+          skipAutoZoomForNextFocusBodyRef.current = settings.focusId
         }
-      }
-
-      if (preset === 'solar') {
-        // Solar scale is intended for AU-scale viewing, so:
-        // - focus the Sun (center the scene)
-        // - restore the requested world-space camera pose
-        if (String(focusBodyRef.current) !== 'SUN') {
-          // `initSpiceSceneRuntime.updateScene` will normally auto-zoom (and/or
-          // apply a home preset) whenever focus changes. For the Solar scale
-          // preset we explicitly choose a camera pose, so skip that behavior
-          // once for this focus change.
-          skipAutoZoomForNextFocusBodyRef.current = 'SUN'
-        }
-        setFocusBody('SUN')
-        controller.restore(SOLAR_SCALE_CAMERA_STATE)
+        controller.restore(settings.cameraPose)
+      } else if (initialPlanetaryRadiusRef.current != null) {
+        controller.radius = THREE.MathUtils.clamp(
+          initialPlanetaryRadiusRef.current,
+          controller.minRadius,
+          controller.maxRadius,
+        )
       }
 
       // Keep slider UI in-sync immediately (no need to wait for the overlay polling interval).
@@ -698,7 +639,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       controller.applyToCamera(camera)
       invalidateRef.current?.()
     },
-    [planetScaleSliderForMultiplier, zoomSliderForRadius],
+    [definition.viewer, planetScaleSliderForMultiplier, zoomSliderForRadius],
   )
 
   // Enable keyboard controls (disabled in e2e mode)
@@ -729,23 +670,22 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     cancelFocusTweenRef.current?.()
 
     // If the current focus IS the sun, this button shouldn't do anything.
-    if (String(focusBody) === 'SUN') return
+    if (focusBody === starId) return
 
     try {
       const etSec = timeStore.getState().etSec
-      const focusState = await spiceClient.kit.getState({
-        target: String(focusBody),
-        observer: 'SUN',
+      const focusMeta = bodiesById.get(focusBody)
+      const star = bodiesById.get(starId)
+      if (!focusMeta || !star) return
+      const relativeStar = await spiceClient.kit.getState({
+        target: String(star.body),
+        observer: String(focusMeta.body),
         at: etSec,
-        frame: J2000_FRAME,
+        frame: definition.coordinates.frame,
       })
+      if (controllerRef.current !== controller || focusBodyRef.current !== focusBody) return
 
-      const focusPosKm = focusState.position
-      const sunPosWorld = new THREE.Vector3(
-        -focusPosKm[0] * kmToWorld,
-        -focusPosKm[1] * kmToWorld,
-        -focusPosKm[2] * kmToWorld,
-      )
+      const sunPosWorld = new THREE.Vector3(...relativeStar.position).multiplyScalar(kmToWorld)
 
       if (sunPosWorld.lengthSq() < 1e-12) return
 
@@ -766,7 +706,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
       // Ensure the Sun's center is offset from screen center by more than the
       // focused body's angular radius, so it can't be fully occluded.
-      const focusMeta = focusOptions.find((b) => String(b.body) === String(focusBody))
       const radiusWorld = (() => {
         if (!focusMeta) return undefined
 
@@ -777,7 +716,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         })
 
         // Keep occlusion math consistent with the rendered body size.
-        return String(focusBody) === 'SUN' ? base * sunScaleMultiplier : base * planetScaleMultiplier
+        return focusBody === starId ? base * sunScaleMultiplier : base * planetScaleMultiplier
       })()
 
       const bodyAngRad =
@@ -899,7 +838,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
 
     return captureSnapshot({
       controller,
-      focusBody,
+      focusBody: bodiesById.get(focusBody)?.body ?? focusBody,
       time: timeStore.getState(),
       scale: {
         cameraFovDeg,
@@ -938,6 +877,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
     })
   }, [
     timeStore,
+    bodiesById,
     focusBody,
     cameraFovDeg,
     sunScaleMultiplier,
@@ -1005,111 +945,118 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
       const camera = cameraRef.current
       if (!controller || !camera) return snapshot
 
-      return applySnapshot(snapshot, {
-        cancelFocusTween: () => cancelFocusTweenRef.current?.(),
-        setSkipAutoZoomForFocusBody: (nextFocusBody) => {
-          // Keep this one-shot token tightly scoped to real focus changes.
-          // If snapshot focus already matches current focus, don't arm a skip
-          // token that may never be consumed by updateScene.
-          skipAutoZoomForNextFocusBodyRef.current =
-            String(nextFocusBody) !== String(focusBodyRef.current) ? nextFocusBody : null
+      const legacyFocus = definition.id === 'sol' ? resolveSolV1Focus(snapshot.focusBody) : undefined
+      const focusId = legacyFocus && bodiesById.has(legacyFocus) ? legacyFocus : definition.viewer.initialFocusId
+      return applySnapshot(
+        { ...snapshot, focusBody: focusId },
+        {
+          cancelFocusTween: () => cancelFocusTweenRef.current?.(),
+          setSkipAutoZoomForFocusBody: (nextFocusBody) => {
+            // Keep this one-shot token tightly scoped to real focus changes.
+            // If snapshot focus already matches current focus, don't arm a skip
+            // token that may never be consumed by updateScene.
+            skipAutoZoomForNextFocusBodyRef.current =
+              nextFocusBody != null && String(nextFocusBody) !== focusBodyRef.current ? String(nextFocusBody) : null
+          },
+
+          applyScale: (next) => {
+            setCameraFovDeg(next.cameraFovDeg)
+            setSunScaleMultiplier(next.sunScaleMultiplier)
+            setPlanetScaleSlider(planetScaleSliderForMultiplier(next.planetScaleMultiplier))
+          },
+
+          applyGuides: (next) => {
+            setShowJ2000Axes(next.showJ2000Axes)
+            setShowBodyFixedAxes(next.showBodyFixedAxes)
+            setLabelsEnabled(next.labelsEnabled)
+            setLabelOcclusionEnabled(next.labelOcclusionEnabled)
+          },
+
+          applyOrbitPaths: (next) => {
+            setOrbitPathsEnabled(next.enabled)
+            setOrbitLineWidthPx(next.lineWidthPx)
+            setOrbitSamplesPerOrbit(next.samplesPerOrbit)
+            setOrbitMaxTotalPoints(next.maxTotalPoints)
+          },
+
+          applySystem: (next) => {
+            setAnimatedSky(next.animatedSky)
+            setSkyTwinkle(next.skyTwinkle)
+            setShowRenderHud(next.showRenderHud)
+          },
+
+          applyRendering: (next) => {
+            setAmbientLightIntensity(next.ambientLightIntensity)
+            setSunLightIntensity(next.sunLightIntensity)
+            setSunEmissiveIntensity(next.sunEmissiveIntensity)
+            setSunEmissiveColor(next.sunEmissiveColor)
+
+            setSunPostprocessExposure(next.sunPostprocessExposure)
+            setSunPostprocessToneMap(next.sunPostprocessToneMap)
+            setSunPostprocessBloomThreshold(next.sunPostprocessBloomThreshold)
+            setSunPostprocessBloomStrength(next.sunPostprocessBloomStrength)
+            setSunPostprocessBloomRadius(next.sunPostprocessBloomRadius)
+            setSunPostprocessBloomResolutionScale(next.sunPostprocessBloomResolutionScale)
+          },
+
+          applyFocusBody: (nextFocusBody) => {
+            setFocusBody(String(nextFocusBody))
+          },
+
+          applyPlayer: (next) => {
+            timeStore.restoreTime(next)
+          },
+
+          flushSceneUpdate: async (next) => {
+            const update = updateSceneRef.current
+            if (!update) return
+
+            await update(
+              {
+                etSec: timeStore.getState().etSec,
+                focusBody: String(next.focusBody),
+                showJ2000Axes: next.guides.showJ2000Axes,
+                showBodyFixedAxes: next.guides.showBodyFixedAxes,
+                cameraFovDeg: next.scale.cameraFovDeg,
+                sunScaleMultiplier: next.scale.sunScaleMultiplier,
+                planetScaleMultiplier: next.scale.planetScaleMultiplier,
+
+                orbitLineWidthPx: next.orbitPaths.lineWidthPx,
+                orbitSamplesPerOrbit: next.orbitPaths.samplesPerOrbit,
+                orbitMaxTotalPoints: next.orbitPaths.maxTotalPoints,
+                orbitPathsEnabled: next.orbitPaths.enabled,
+                labelsEnabled: next.guides.labelsEnabled,
+                labelOcclusionEnabled: next.guides.labelOcclusionEnabled,
+
+                ambientLightIntensity: next.rendering.ambientLightIntensity,
+                sunLightIntensity: next.rendering.sunLightIntensity,
+                sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
+                sunEmissiveColor: next.rendering.sunEmissiveColor,
+
+                earthNightAlbedo,
+                earthTwilight,
+                earthNightLightsIntensity,
+                earthAtmosphereIntensity,
+                earthCloudsNightMultiplier,
+              },
+              { required: !sceneReadyRef.current },
+            )
+          },
+
+          applyCamera: (nextCamera) => {
+            if (controllerRef.current !== controller) return
+            controller.restore(snapshotCameraToControllerState(nextCamera))
+            controller.applyToCamera(camera)
+            setZoomSlider(zoomSliderForRadius(controller.radius, controller.minRadius, controller.maxRadius))
+            invalidateRef.current?.()
+          },
         },
-
-        applyScale: (next) => {
-          setCameraFovDeg(next.cameraFovDeg)
-          setSunScaleMultiplier(next.sunScaleMultiplier)
-          setPlanetScaleSlider(planetScaleSliderForMultiplier(next.planetScaleMultiplier))
-        },
-
-        applyGuides: (next) => {
-          setShowJ2000Axes(next.showJ2000Axes)
-          setShowBodyFixedAxes(next.showBodyFixedAxes)
-          setLabelsEnabled(next.labelsEnabled)
-          setLabelOcclusionEnabled(next.labelOcclusionEnabled)
-        },
-
-        applyOrbitPaths: (next) => {
-          setOrbitPathsEnabled(next.enabled)
-          setOrbitLineWidthPx(next.lineWidthPx)
-          setOrbitSamplesPerOrbit(next.samplesPerOrbit)
-          setOrbitMaxTotalPoints(next.maxTotalPoints)
-        },
-
-        applySystem: (next) => {
-          setAnimatedSky(next.animatedSky)
-          setSkyTwinkle(next.skyTwinkle)
-          setShowRenderHud(next.showRenderHud)
-        },
-
-        applyRendering: (next) => {
-          setAmbientLightIntensity(next.ambientLightIntensity)
-          setSunLightIntensity(next.sunLightIntensity)
-          setSunEmissiveIntensity(next.sunEmissiveIntensity)
-          setSunEmissiveColor(next.sunEmissiveColor)
-
-          setSunPostprocessExposure(next.sunPostprocessExposure)
-          setSunPostprocessToneMap(next.sunPostprocessToneMap)
-          setSunPostprocessBloomThreshold(next.sunPostprocessBloomThreshold)
-          setSunPostprocessBloomStrength(next.sunPostprocessBloomStrength)
-          setSunPostprocessBloomRadius(next.sunPostprocessBloomRadius)
-          setSunPostprocessBloomResolutionScale(next.sunPostprocessBloomResolutionScale)
-        },
-
-        applyFocusBody: (nextFocusBody) => {
-          setFocusBody(nextFocusBody)
-        },
-
-        applyPlayer: (next) => {
-          timeStore.restoreTime(next)
-        },
-
-        flushSceneUpdate: async (next) => {
-          const update = updateSceneRef.current
-          if (!update) return
-
-          await update(
-            {
-              etSec: timeStore.getState().etSec,
-              focusBody: next.focusBody,
-              showJ2000Axes: next.guides.showJ2000Axes,
-              showBodyFixedAxes: next.guides.showBodyFixedAxes,
-              cameraFovDeg: next.scale.cameraFovDeg,
-              sunScaleMultiplier: next.scale.sunScaleMultiplier,
-              planetScaleMultiplier: next.scale.planetScaleMultiplier,
-
-              orbitLineWidthPx: next.orbitPaths.lineWidthPx,
-              orbitSamplesPerOrbit: next.orbitPaths.samplesPerOrbit,
-              orbitMaxTotalPoints: next.orbitPaths.maxTotalPoints,
-              orbitPathsEnabled: next.orbitPaths.enabled,
-              labelsEnabled: next.guides.labelsEnabled,
-              labelOcclusionEnabled: next.guides.labelOcclusionEnabled,
-
-              ambientLightIntensity: next.rendering.ambientLightIntensity,
-              sunLightIntensity: next.rendering.sunLightIntensity,
-              sunEmissiveIntensity: next.rendering.sunEmissiveIntensity,
-              sunEmissiveColor: next.rendering.sunEmissiveColor,
-
-              earthNightAlbedo,
-              earthTwilight,
-              earthNightLightsIntensity,
-              earthAtmosphereIntensity,
-              earthCloudsNightMultiplier,
-            },
-            { required: !sceneReadyRef.current },
-          )
-        },
-
-        applyCamera: (nextCamera) => {
-          if (controllerRef.current !== controller) return
-          controller.restore(snapshotCameraToControllerState(nextCamera))
-          controller.applyToCamera(camera)
-          setZoomSlider(zoomSliderForRadius(controller.radius, controller.minRadius, controller.maxRadius))
-          invalidateRef.current?.()
-        },
-      })
+      )
     },
     [
       timeStore,
+      definition,
+      bodiesById,
       planetScaleSliderForMultiplier,
       earthNightAlbedo,
       earthTwilight,
@@ -1264,7 +1211,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         skyAnimationActiveRef,
         initialFocusBody: latestUiRef.current.focusBody,
         initialCameraFovDeg: latestUiRef.current.cameraFovDeg,
-        getHomePresetState,
+        getHomePresetState: (id) => definition.viewer.homePoses.get(String(id)) ?? null,
         hud: () => hudApi,
       })
     } catch (error) {
@@ -1312,7 +1259,8 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
         invalidate: three.invalidate,
         renderOnce: three.renderOnce,
         computeFocusRadius,
-        setFocusBody: (body) => setFocusBody(body),
+        sceneBodyIds: new Set(definition.bodies.map((body) => body.id)),
+        setFocusBody,
         setSelectedBody: (body) => setSelectedBody(body),
         selectedBodyIdRef,
         selectionOverlay: three.selectionOverlay,
@@ -1383,7 +1331,6 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
           cancelFocusTween,
           focusOn,
           resetLookOffset: () => three.controller.resetLookOffset(),
-          getHomePresetState,
           initialControllerStateRef,
           skipAutoZoomForNextFocusBodyRef,
           selectedBodyIdRef,
@@ -1534,7 +1481,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
             updateSceneRef.current?.({
               etSec,
               ...latestUiRef.current,
-              focusBody: 'SUN',
+              focusBody: definition.primaryLight.bodyId,
             })
 
             const { radius, yaw, pitch } = SUN_CAMERA_PRESETS[preset]
@@ -1950,7 +1897,7 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
                           }}
                         >
                           {focusOptions.map((b) => (
-                            <option key={b.id} value={String(b.body)}>
+                            <option key={b.id} value={b.id}>
                               {b.style.label ?? b.id}
                             </option>
                           ))}
@@ -1958,16 +1905,14 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
                       </div>
 
                       <button
-                        className={`asciiBtn asciiBtnWide ${String(focusBody) === 'SUN' ? 'asciiBtnDisabled' : ''}`}
+                        className={`asciiBtn asciiBtnWide ${focusBody === starId ? 'asciiBtnDisabled' : ''}`}
                         type="button"
                         onClick={refocusSun}
-                        disabled={String(focusBody) === 'SUN'}
+                        disabled={focusBody === starId}
                         title="Quickly refocus the scene on the Sun"
                       >
                         <span className="asciiBtnBracket">[</span>
-                        <span className="asciiBtnContent">
-                          {String(focusBody) === 'SUN' ? 'focus sun' : 'Focus Sun'}
-                        </span>
+                        <span className="asciiBtnContent">{focusBody === starId ? 'focus sun' : 'Focus Sun'}</span>
                         <span className="asciiBtnBracket">]</span>
                       </button>
                     </div>
@@ -2336,8 +2281,9 @@ export function SceneCanvas({ definition }: { definition: SceneDefinition }) {
           selectedBody={selectedBody}
           focusBody={focusBody}
           spice={spiceClient}
-          observer="SUN"
-          frame={J2000_FRAME}
+          bodiesById={bodiesById}
+          observer={definition.coordinates.observer}
+          frame={definition.coordinates.frame}
         />
       ) : null}
 

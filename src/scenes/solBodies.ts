@@ -1,6 +1,6 @@
-import type { BodyRef, FrameId, KernelPackId } from '../spice/types.js'
+import type { FrameId, KernelPackId } from '../spice/types.js'
 
-import type { SceneBodyStyle } from '../scene/SceneModel.js'
+import type { SceneBodyDefinition } from './sceneDefinition.js'
 
 export type BodyId =
   | 'SUN'
@@ -26,26 +26,8 @@ export type NaifIds = {
 /**
  * Registry entry describing a renderable body and its SPICE/visual metadata.
  */
-export interface BodyRegistryEntry {
-  /** Stable viewer identifier (currently matches SPICE body name). */
+export interface BodyRegistryEntry extends SceneBodyDefinition {
   id: BodyId
-
-  /** NAIF ID or a SPICE-recognized body name; fed into `SpiceClient.getBodyState`. */
-  body: BodyRef
-
-  /**
-   * Intended NAIF numeric IDs for this entry.
-   *
-   * For the Sun this is always 10. For planets, `body` is the planet's own ID
-   * (199..899) and `barycenter` is the corresponding barycenter (1..8).
-   *
-   * NOTE: runtime SPICE lookups should continue to use `BodyRegistryEntry.body`
-   * (`BodyRef`), since some ephemeris kernels (e.g. de432s) provide barycenter
-   * states rather than planet body IDs.
-   */
-  naifIds?: NaifIds
-
-  kind: BodyKind
 
   /** Optional parent reference for moons (and potentially rings/spacecraft later). */
   parentId?: BodyId
@@ -62,8 +44,18 @@ export interface BodyRegistryEntry {
 
   /** Optional body-fixed frame for debug axes (e.g. `"IAU_EARTH"`). */
   bodyFixedFrame?: FrameId
+}
 
-  style: SceneBodyStyle
+const DAY_SEC = 86_400
+
+function orbitGuide(periodDays: number, center = 'SUN'): NonNullable<SceneBodyDefinition['orbitGuide']> {
+  const periodSec = periodDays * DAY_SEC
+  return {
+    center,
+    periodSec,
+    spanSec: Math.min(periodSec, 50 * 365.25 * DAY_SEC),
+    resampleEverySec: center === 'EARTH' ? 3_600 : DAY_SEC,
+  }
 }
 
 export const SOL_BODIES: readonly BodyRegistryEntry[] = [
@@ -89,6 +81,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'MERCURY',
+    orbitGuide: orbitGuide(87.969),
     // NOTE: de432s has barycenters for most planets (not the planet body IDs).
     body: 1,
     naifIds: { body: 199, barycenter: 1 },
@@ -118,6 +111,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'VENUS',
+    orbitGuide: orbitGuide(224.701),
     body: 2,
     naifIds: { body: 299, barycenter: 2 },
     kind: 'planet',
@@ -137,6 +131,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'EARTH',
+    orbitGuide: orbitGuide(365.256),
     body: 'EARTH',
     naifIds: { body: 399, barycenter: 3 },
     kind: 'planet',
@@ -186,6 +181,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'MARS',
+    orbitGuide: orbitGuide(686.98),
     body: 4,
     naifIds: { body: 499, barycenter: 4 },
     kind: 'planet',
@@ -250,6 +246,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'JUPITER',
+    orbitGuide: orbitGuide(4_332.589),
     body: 5,
     naifIds: { body: 599, barycenter: 5 },
     kind: 'planet',
@@ -269,6 +266,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'SATURN',
+    orbitGuide: orbitGuide(10_759.22),
     body: 6,
     naifIds: { body: 699, barycenter: 6 },
     kind: 'planet',
@@ -295,6 +293,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'URANUS',
+    orbitGuide: orbitGuide(30_685.4),
     body: 7,
     naifIds: { body: 799, barycenter: 7 },
     kind: 'planet',
@@ -326,6 +325,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'NEPTUNE',
+    orbitGuide: orbitGuide(60_189),
     body: 8,
     naifIds: { body: 899, barycenter: 8 },
     kind: 'planet',
@@ -345,6 +345,7 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
   },
   {
     id: 'MOON',
+    orbitGuide: orbitGuide(27.321_661, 'EARTH'),
     body: 'MOON',
     naifIds: { body: 301 },
     kind: 'moon',

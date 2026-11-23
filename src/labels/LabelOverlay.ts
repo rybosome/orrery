@@ -11,7 +11,7 @@
  */
 
 import * as THREE from 'three'
-import type { BodyId, BodyKind } from '../scene/BodyRegistry.js'
+import type { SceneBodyDefinition } from '../scenes/sceneDefinition.js'
 
 // ---------- Types ----------
 
@@ -19,9 +19,9 @@ import type { BodyId, BodyKind } from '../scene/BodyRegistry.js'
  * Body metadata needed to render a label + leader line.
  */
 export interface LabelBody {
-  id: BodyId
+  id: string
   label: string
-  kind: BodyKind
+  kind: SceneBodyDefinition['kind']
   mesh: THREE.Mesh
   radiusKm: number
 }
@@ -36,8 +36,8 @@ export interface LabelOverlayOptions {
 /** Per-frame update options for {@link LabelOverlay.update}. */
 export interface LabelOverlayUpdateOptions {
   bodies: LabelBody[]
-  focusBodyId: BodyId | undefined
-  selectedBodyId: BodyId | undefined
+  focusBodyId: string | undefined
+  selectedBodyId: string | undefined
   labelsEnabled: boolean
   occlusionEnabled: boolean
   pickables: THREE.Mesh[]
@@ -79,7 +79,7 @@ const LABEL_PADDING_X = 8
 const LABEL_PADDING_Y = 4
 
 // Priority order for collision avoidance
-const KIND_PRIORITY: Record<BodyKind, number> = {
+const KIND_PRIORITY: Record<SceneBodyDefinition['kind'], number> = {
   star: 10,
   planet: 5,
   moon: 2,
@@ -338,7 +338,7 @@ export class LabelOverlay {
 
   private overlayDiv: HTMLDivElement
   private svgElement: SVGSVGElement
-  private labelStates: Map<BodyId, LabelState> = new Map()
+  private labelStates: Map<string, LabelState> = new Map()
 
   private raycaster = new THREE.Raycaster()
 
@@ -387,7 +387,7 @@ export class LabelOverlay {
     const height = this.container.clientHeight
 
     // Sync label state with bodies
-    const currentIds = new Set<BodyId>()
+    const currentIds = new Set<string>()
     for (const body of bodies) {
       currentIds.add(body.id)
 

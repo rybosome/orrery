@@ -1,5 +1,6 @@
 import type { KernelPack } from '@rybosome/tspice'
 
+import type { CameraControllerState } from '../controls/CameraController.js'
 import type { SceneBody } from '../scene/SceneModel.js'
 import type { BodyRef, FrameId } from '../spice/types.js'
 
@@ -7,7 +8,8 @@ import type { BodyRef, FrameId } from '../spice/types.js'
 export interface SceneBodyDefinition extends SceneBody {
   id: string
   kind: 'star' | 'planet' | 'moon'
-  orbitGuide?: { center: BodyRef; spanSec: number; resampleEverySec: number }
+  naifIds?: { body: number; barycenter?: number }
+  orbitGuide?: { center: BodyRef; spanSec: number; resampleEverySec: number; periodSec?: number }
 }
 
 /** Coverage and playback settings for a scene session. */
@@ -33,6 +35,19 @@ export interface SceneDefinition {
   viewer: {
     initialFocusId: string
     cameraFovDeg: number
+    homePoses: ReadonlyMap<string, CameraControllerState>
+    scalePresets: Readonly<
+      Record<
+        'planetary' | 'solar',
+        {
+          focusId: string
+          planetMultiplier: number
+          starMultiplier: number
+          cameraPose?: CameraControllerState
+        }
+      >
+    >
+    radiusLimits: { minRadius: number; maxRadius: number }
     ambientLightIntensity: number
     starEmission: { intensity: number; color: string }
   }
@@ -58,9 +73,15 @@ export function validateSceneDefinition(scene: SceneDefinition): void {
 
   const bodies = new Map<string, SceneBodyDefinition>()
   for (const body of scene.bodies) {
-    if (!body.id.trim() || bodies.has(body.id)) fail(`Invalid or duplicate body ID "${body.id}"`)
+    if (!body.id.trim() || body.id !== body.id.trim() || bodies.has(body.id))
+      fail(`Invalid or duplicate body ID "${body.id}"`)
     if (!isPositive(body.style.radiusKm)) fail(`Invalid radius for "${body.id}"`)
-    if (body.orbitGuide && (!isPositive(body.orbitGuide.spanSec) || !isPositive(body.orbitGuide.resampleEverySec))) {
+    if (
+      body.orbitGuide &&
+      (!isPositive(body.orbitGuide.spanSec) ||
+        !isPositive(body.orbitGuide.resampleEverySec) ||
+        (body.orbitGuide.periodSec != null && !isPositive(body.orbitGuide.periodSec)))
+    ) {
       fail(`Invalid orbit guide sampling for "${body.id}"`)
     }
     bodies.set(body.id, body)
@@ -75,6 +96,16 @@ export function validateSceneDefinition(scene: SceneDefinition): void {
   }
 
   const { primaryLight, viewer, time, kernelPack } = scene
+  for (const id of viewer.homePoses.keys()) {
+    if (!bodies.has(id)) fail(`Unknown home pose body "${id}"`)
+  }
+  for (const preset of Object.values(viewer.scalePresets)) {
+    if (!bodies.has(preset.focusId) || !isPositive(preset.planetMultiplier) || !isPositive(preset.starMultiplier)) {
+      fail('Invalid scale preset')
+    }
+  }
+  const { minRadius, maxRadius } = viewer.radiusLimits
+  if (!isPositive(minRadius) || !isPositive(maxRadius) || minRadius >= maxRadius) fail('Invalid camera radius limits')
   if (!primaryLight.color.trim() || !isNonNegative(primaryLight.intensity)) fail('Invalid primary light')
   if (
     !isPositive(viewer.cameraFovDeg) ||

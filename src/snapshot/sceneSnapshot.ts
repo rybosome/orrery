@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import type { CameraControllerState } from '../controls/CameraController.js'
-import { getHomePresetState } from '../interaction/homePresets.js'
+import { getHomePresetState } from '../scenes/solHomePresets.js'
 import type { SunToneMap } from '../runtimeConfig/sceneCanvasRuntimeConfig.js'
 import type { BodyRef } from '../spice/types.js'
 import { quantizeEt } from '../time/quantizeEt.js'

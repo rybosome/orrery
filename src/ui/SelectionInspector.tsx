@@ -1,15 +1,15 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { SpiceAsync } from '@rybosome/tspice'
 import type { BodyRef, FrameId } from '../spice/types.js'
-import { resolveBodyRegistryEntry, type BodyRegistryEntry } from '../scene/BodyRegistry.js'
-import { getApproxOrbitalPeriodSec } from '../scene/orbits/orbitalPeriods.js'
+import type { SceneBodyDefinition } from '../scenes/sceneDefinition.js'
 import { getNaifExtras, type NaifExtras } from '../data/naifExtras.js'
 import { useTimeStoreSelector, type TimeStore } from '../time/timeStore.js'
 
 interface SelectionInspectorProps {
   timeStore: TimeStore
-  selectedBody: BodyRef
-  focusBody: BodyRef
+  selectedBody: string
+  focusBody: string
+  bodiesById: ReadonlyMap<string, SceneBodyDefinition>
   spice: SpiceAsync
   observer: BodyRef
   frame: FrameId
@@ -161,56 +161,6 @@ function buildExtrasGroups(
   return groups
 }
 
-/** Look up body registry entry by BodyRef. */
-function findBodyRegistryEntry(bodyRef: BodyRef): BodyRegistryEntry | undefined {
-  return resolveBodyRegistryEntry(String(bodyRef))
-}
-
-const INTEGER_BODY_REF_RE = /^[+-]?\d+$/
-
-function tryNormalizeNumericBodyRef(raw: string): number | null {
-  // We only normalize when the string is an unambiguous base-10 integer.
-  //
-  // IMPORTANT: this intentionally does NOT accept decimals / exponent notation
-  // so it stays aligned with the registry resolver policy.
-  const s = raw.trim()
-  if (!s) return null
-  if (!INTEGER_BODY_REF_RE.test(s)) return null
-
-  const n = Number(s)
-  if (!Number.isSafeInteger(n)) return null
-  return n
-}
-
-function resolveBodyRefForSpice(bodyRef: BodyRef, registryEntry: BodyRegistryEntry | undefined): BodyRef | null {
-  if (typeof bodyRef !== 'string') {
-    return Number.isSafeInteger(bodyRef) ? bodyRef : null
-  }
-
-  const trimmed = bodyRef.trim()
-  if (!trimmed) return null
-
-  // If the caller passed a BodyRegistry `id` (e.g. "MARS"), use the registry's
-  // preferred SPICE lookup key (often the barycenter numeric ID for de432s).
-  //
-  // This avoids passing arbitrary strings into SPICE.
-  if (registryEntry && trimmed.toUpperCase() === registryEntry.id) {
-    return registryEntry.body
-  }
-
-  // If we're carrying around numeric IDs as strings (e.g. from <select />),
-  // normalize them to safe numeric refs.
-  const numeric = tryNormalizeNumericBodyRef(trimmed)
-  if (numeric != null) return numeric
-
-  // If we resolved via the registry (e.g. from URL params / mesh.userData),
-  // use the registry's preferred SPICE key.
-  if (registryEntry) return registryEntry.body
-
-  // Refuse to pass unknown strings into SPICE.
-  return null
-}
-
 /** Format body kind for display. */
 function formatBodyKind(kind: string): string {
   return kind.charAt(0).toUpperCase() + kind.slice(1)
@@ -220,6 +170,7 @@ function formatBodyKind(kind: string): string {
 export function SelectionInspector({
   selectedBody,
   focusBody,
+  bodiesById,
   spice,
   observer,
   frame,
@@ -247,50 +198,21 @@ export function SelectionInspector({
   // like taps/gestures are being "eaten" on mobile).
   const etSec = useTimeStoreSelector(timeStore, (s) => s.etSec)
 
-  const registryEntry = useMemo(() => findBodyRegistryEntry(selectedBody), [selectedBody])
-  const focusRegistryEntry = useMemo(() => findBodyRegistryEntry(focusBody), [focusBody])
-
-  const selectedBodyForSpice = useMemo(
-    () => resolveBodyRefForSpice(selectedBody, registryEntry),
-    [selectedBody, registryEntry],
-  )
-  const focusBodyForSpice = useMemo(
-    () => resolveBodyRefForSpice(focusBody, focusRegistryEntry),
-    [focusBody, focusRegistryEntry],
-  )
-  const observerRegistryEntry = useMemo(() => findBodyRegistryEntry(observer), [observer])
-  const observerForSpice = useMemo(
-    () => resolveBodyRefForSpice(observer, observerRegistryEntry),
-    [observer, observerRegistryEntry],
-  )
-
-  const unavailableReason = useMemo(() => {
-    const selectedJson = JSON.stringify(selectedBody)
-
-    if (selectedBodyForSpice == null) {
-      return `Unsupported target: selectedBody=${selectedJson}`
-    }
-
-    if (observerForSpice == null) {
-      return `Unsupported observer: observer=${JSON.stringify(observer)} (selectedBody=${selectedJson})`
-    }
-
-    if (focusBodyForSpice == null) {
-      return `Unsupported focus: focusBody=${JSON.stringify(focusBody)} (selectedBody=${selectedJson})`
-    }
-
-    return null
-  }, [selectedBodyForSpice, observerForSpice, focusBodyForSpice, selectedBody, observer, focusBody])
-
-  const orbitalPeriodSec = useMemo(
-    () => (selectedBodyForSpice != null ? getApproxOrbitalPeriodSec(selectedBodyForSpice) : null),
-    [selectedBodyForSpice],
-  )
+  const bodyDefinition = bodiesById.get(selectedBody)
+  const focusDefinition = bodiesById.get(focusBody)
+  const selectedBodyForSpice = bodyDefinition?.body
+  const focusBodyForSpice = focusDefinition?.body
+  const orbitalPeriodSec = bodyDefinition?.orbitGuide?.periodSec ?? null
+  const unavailableReason = !bodyDefinition
+    ? `Unsupported target: ${selectedBody}`
+    : !focusDefinition
+      ? `Unsupported focus: ${focusBody}`
+      : null
 
   useEffect(() => {
     let cancelled = false
 
-    if (selectedBodyForSpice == null || observerForSpice == null || focusBodyForSpice == null) {
+    if (selectedBodyForSpice == null || focusBodyForSpice == null) {
       setBodyInfo(null)
       return
     }
@@ -300,7 +222,7 @@ export function SelectionInspector({
         // Get selected body's state relative to scene observer
         const selectedState = await spice.kit.getState({
           target: String(selectedBodyForSpice),
-          observer: String(observerForSpice),
+          observer: String(observer),
           at: etSec,
           frame,
         })
@@ -349,50 +271,27 @@ export function SelectionInspector({
     return () => {
       cancelled = true
     }
-  }, [selectedBodyForSpice, focusBodyForSpice, spice, etSec, observerForSpice, frame, orbitalPeriodSec])
+  }, [selectedBodyForSpice, focusBodyForSpice, spice, etSec, observer, frame, orbitalPeriodSec])
 
-  const bodyLabel =
-    registryEntry?.style.label ??
-    (typeof selectedBody === 'string'
-      ? selectedBody.charAt(0).toUpperCase() + selectedBody.slice(1).toLowerCase()
-      : `Body ${selectedBody}`)
+  const bodyLabel = bodyDefinition?.style.label ?? selectedBody
+  const focusLabel = focusDefinition?.style.label ?? focusBody
+  const isFocused = selectedBody === focusBody
 
-  const focusLabel =
-    focusRegistryEntry?.style.label ??
-    (typeof focusBody === 'string'
-      ? focusBody.charAt(0).toUpperCase() + focusBody.slice(1).toLowerCase()
-      : `Body ${focusBody}`)
-
-  const isFocused = useMemo(() => {
-    // Match UI semantics: compare by stable registry ids when possible.
-    if (registryEntry && focusRegistryEntry) {
-      return registryEntry.id === focusRegistryEntry.id
-    }
-
-    // Fall back to comparing normalized numeric refs, then raw string forms.
-    const selectedNorm = typeof selectedBody === 'string' ? tryNormalizeNumericBodyRef(selectedBody) : selectedBody
-    const focusNorm = typeof focusBody === 'string' ? tryNormalizeNumericBodyRef(focusBody) : focusBody
-    if (selectedNorm != null && focusNorm != null) {
-      return String(selectedNorm) === String(focusNorm)
-    }
-    return String(selectedBody) === String(focusBody)
-  }, [registryEntry, focusRegistryEntry, selectedBody, focusBody])
-
-  const naifId = registryEntry?.naifIds?.body
+  const naifId = bodyDefinition?.naifIds?.body
   const extras = useMemo(() => getNaifExtras(naifId), [naifId])
   const extrasGroups = useMemo(
     () =>
       buildExtrasGroups(extras ?? {}, {
         orbitalPeriodSec: orbitalPeriodSec ?? null,
-        fallbackRadiusKm: registryEntry?.style.radiusKm ?? null,
+        fallbackRadiusKm: bodyDefinition?.style.radiusKm ?? null,
       }),
-    [extras, orbitalPeriodSec, registryEntry?.style.radiusKm],
+    [extras, orbitalPeriodSec, bodyDefinition?.style.radiusKm],
   )
 
   const typeValue = extras?.classification
     ? formatBodyKind(extras.classification)
-    : registryEntry
-      ? formatBodyKind(registryEntry.kind)
+    : bodyDefinition
+      ? formatBodyKind(bodyDefinition.kind)
       : null
 
   return (
@@ -478,12 +377,12 @@ export function SelectionInspector({
               </>
             ) : (
               <>
-                {(registryEntry?.style.radiusKm || orbitalPeriodSec) && <div className="selectionInspectorDivider" />}
+                {(bodyDefinition?.style.radiusKm || orbitalPeriodSec) && <div className="selectionInspectorDivider" />}
 
-                {registryEntry?.style.radiusKm && (
+                {bodyDefinition?.style.radiusKm && (
                   <div className="selectionInspectorRow">
                     <span className="selectionInspectorLabel">Radius:</span>
-                    <span className="selectionInspectorValue">{formatRadius(registryEntry.style.radiusKm)}</span>
+                    <span className="selectionInspectorValue">{formatRadius(bodyDefinition.style.radiusKm)}</span>
                   </div>
                 )}
 
