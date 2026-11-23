@@ -3,12 +3,14 @@ import type { KernelPack } from '@rybosome/tspice'
 import type { SceneBody } from '../scene/SceneModel.js'
 import type { BodyRef, FrameId } from '../spice/types.js'
 
+/** An authored renderable body with a stable ID and an optional orbit guide. */
 export interface SceneBodyDefinition extends SceneBody {
   id: string
   kind: 'star' | 'planet' | 'moon'
   orbitGuide?: { center: BodyRef; spanSec: number; resampleEverySec: number }
 }
 
+/** Coverage and playback settings for a scene session. */
 export interface SceneTimeDefinition {
   minUtc: string
   maxUtc: string
@@ -19,6 +21,7 @@ export interface SceneTimeDefinition {
   resumeRates: { closeSecPerSec: number; wideSecPerSec: number }
 }
 
+/** The kernels, bodies, and viewer defaults deployed together as a scene. */
 export interface SceneDefinition {
   id: string
   title: string
