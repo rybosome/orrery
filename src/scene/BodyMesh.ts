@@ -5,32 +5,19 @@ import { createRingMesh } from './RingMesh.js'
 import {
   isAtmosphereAppearanceLayer,
   isAerosolAppearanceLayer,
-  isEarthAppearanceLayer,
   type BodyAppearanceStyle,
   type BodyTextureKind,
 } from './SceneModel.js'
 import { isDev } from '../utils/isDev.js'
 
 export type CreateBodyMeshOptions = {
-  /** Optional stable ID (e.g. `"EARTH"`) for body-specific rendering. */
+  /** Optional stable ID (e.g. `"EARTH"`) for diagnostics and deterministic texture detail. */
   bodyId?: string
 
   appearance: BodyAppearanceStyle
 }
 
-export type EarthAppearanceTuning = {
-  nightAlbedo: number
-  twilight: number
-  nightLightsIntensity: number
-  atmosphereIntensity: number
-  cloudsNightMultiplier: number
-}
-
-export type BodyMeshUpdate = (args: {
-  sunDirWorld: THREE.Vector3
-  etSec: number
-  earthTuning?: EarthAppearanceTuning
-}) => void
+export type BodyMeshUpdate = (args: { sunDirWorld: THREE.Vector3; etSec: number }) => void
 
 function stableHash01(input: string): number {
   // Deterministic (no RNG): keep e2e snapshots stable.
@@ -170,7 +157,9 @@ type ShaderSourceKey = 'fragmentShader' | 'vertexShader'
 type OnBeforeCompile = NonNullable<THREE.Material['onBeforeCompile']>
 type BeforeCompileShader = Parameters<OnBeforeCompile>[0]
 
-function composeOnBeforeCompile(material: THREE.Material, patch: OnBeforeCompile): () => void {
+function composeOnBeforeCompile(material: THREE.Material, key: string, patch: OnBeforeCompile): () => void {
+  const prevKey = material.customProgramCacheKey
+  const composedKey = `${prevKey.call(material)}|${key}`
   const prev = material.onBeforeCompile
 
   const composed: OnBeforeCompile = (shader, renderer) => {
@@ -179,12 +168,14 @@ function composeOnBeforeCompile(material: THREE.Material, patch: OnBeforeCompile
   }
 
   material.onBeforeCompile = composed
+  material.customProgramCacheKey = () => composedKey
 
   // Allow callers to restore the previous hook (useful for cleanup / testing).
   // Guard against clobbering if `onBeforeCompile` was overwritten later.
   return () => {
     if (material.onBeforeCompile === composed) {
       material.onBeforeCompile = prev
+      material.customProgramCacheKey = prevKey
     }
   }
 }
@@ -412,7 +403,7 @@ function safeShaderReplaceAllInSource(args: {
  * This allows updating scale without rebuilding geometry.
  */
 export function createBodyMesh(options: CreateBodyMeshOptions): {
-  mesh: THREE.Mesh
+  mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>
   dispose: () => void
   ready: Promise<void>
   update?: BodyMeshUpdate
@@ -427,12 +418,13 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
   const warnOnce = createWarnOnce()
 
-  const isEarth = options.bodyId === 'EARTH'
+  const { surface, emission, nightLights, clouds, water } = options.appearance
+  const textureLongitudeOffset = options.appearance.textureLongitudeOffsetRad ?? 0
+  if (textureLongitudeOffset !== 0) geometry.rotateZ(textureLongitudeOffset)
 
   // Collect async assets so `ready` consistently represents "all appearance assets are ready".
   const readyExtras: Promise<void>[] = []
 
-  const surface = options.appearance.surface
   const surfaceTexture = surface.texture
   const textureKind = surfaceTexture?.kind
   const textureUrl = surfaceTexture?.url
@@ -442,7 +434,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
   const roughnessTextureUrl = surface.roughnessTexture?.url
   const normalScale = surface.normalScale
 
-  const surfaceRoughness = THREE.MathUtils.clamp(surface.roughness ?? (textureKind === 'sun' ? 0.2 : 0.9), 0.0, 1.0)
+  const surfaceRoughness = THREE.MathUtils.clamp(surface.roughness ?? 0.9, 0.0, 1.0)
   const surfaceMetalness = THREE.MathUtils.clamp(surface.metalness ?? 0.0, 0.0, 1.0)
 
   // Three.js' bumpScale is unbounded but large values can cause extreme artifacts.
@@ -490,8 +482,8 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     roughness: surfaceRoughness,
     metalness: surfaceMetalness,
     map,
-    emissive: textureKind === 'sun' ? new THREE.Color('#ffcc55') : new THREE.Color('#000000'),
-    emissiveIntensity: textureKind === 'sun' ? 5 : 0.0,
+    emissive: new THREE.Color(emission?.color ?? '#000000'),
+    emissiveIntensity: emission?.intensity ?? 0,
   })
 
   const onBeforeCompileRestores: Array<() => void> = []
@@ -676,9 +668,6 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     readyExtras.push(ringResult.ready)
   }
 
-  // Earth-only higher-fidelity appearance layers (night lights, clouds, atmosphere, ocean glint).
-  // This is kept opt-in via `appearance.layers` so other bodies remain unchanged.
-  const earth = options.appearance.layers?.find(isEarthAppearanceLayer)?.earth
   const atmosphere = options.appearance.layers?.find(isAtmosphereAppearanceLayer)?.atmosphere
   const aerosol = options.appearance.layers?.find(isAerosolAppearanceLayer)?.aerosol
 
@@ -791,14 +780,14 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
   // Optional terminator/night-side albedo suppression.
   // This avoids ambient light washing out airless bodies on the night side.
-  const useTerminatorDarkening = !isEarth && nightAlbedo != null && nightAlbedo < 1.0
+  const useTerminatorDarkening = !nightLights && !water && nightAlbedo != null && nightAlbedo < 1.0
 
   if (useTerminatorDarkening) {
     material.userData.tspiceNightSideDarkening = true
     const uNightAlbedo = { value: nightAlbedo }
     const uTerminatorTwilight = { value: terminatorTwilight }
 
-    const restoreTerminatorDarkening = composeOnBeforeCompile(material, (shader) => {
+    const restoreTerminatorDarkening = composeOnBeforeCompile(material, 'restoreTerminatorDarkening', (shader) => {
       shader.uniforms.uSunDirWorld = { value: uSunDirWorld }
       shader.uniforms.uNightAlbedo = uNightAlbedo
       shader.uniforms.uTerminatorTwilight = uTerminatorTwilight
@@ -875,7 +864,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     const uDetailNoiseScale = { value: detailNoiseScale }
     const uDetailNoiseSeed = { value: detailNoiseSeed }
 
-    const restoreDetailNoise = composeOnBeforeCompile(material, (shader) => {
+    const restoreDetailNoise = composeOnBeforeCompile(material, 'restoreDetailNoise', (shader) => {
       shader.uniforms.uDetailNoiseStrength = uDetailNoiseStrength
       shader.uniforms.uDetailNoiseScale = uDetailNoiseScale
       shader.uniforms.uDetailNoiseSeed = uDetailNoiseSeed
@@ -966,8 +955,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
   }
 
   // Generic atmosphere shell layer (used for thin/low-intensity atmospheres like Mars).
-  // Note: Earth uses its dedicated `earth` layer for atmosphere, clouds, etc.
-  if (!isEarth && atmosphere) {
+  if (atmosphere) {
     // Clamp to keep configs safe and prevent inverted shells / huge overdraw.
     const atmosphereRadiusRatio = clampFinite(atmosphere.radiusRatio, 1.001, 1.25, 1.01)
     const atmosphereIntensity = clampFinite(atmosphere.intensity, 0.0, 2.0, 0.25)
@@ -976,7 +964,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
     createRimGlowShell({
       radiusRatio: atmosphereRadiusRatio,
-      renderOrder: 1,
+      renderOrder: atmosphere.renderOrder ?? 1,
       color: atmosphere.color ?? '#ffffff',
       intensity: { value: atmosphereIntensity },
       rimPower: { value: atmosphereRimPower },
@@ -1009,41 +997,41 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
   const waterMaskUniform = { value: black1x1 as THREE.Texture }
   const useWaterMaskUniform = { value: 0.0 }
 
-  if (isEarth && earth) {
+  if (nightLights || water) {
     ensureSunDirWorldUpdate()
-    // Night lights + ocean glint (surface shader patch)
-    material.emissive.set('#000000')
-    material.emissiveIntensity = 1.0
+    if (nightLights) {
+      material.emissive.set('#000000')
+      material.emissiveIntensity = 1.0
+    }
 
-    // Runtime-tunable Earth appearance knobs (wired to debug sliders).
-    const uNightAlbedo = { value: 0.004 }
-    const uTwilight = { value: earth.nightLightsTwilight ?? 0.12 }
-    const uNightLightsIntensity = { value: earth.nightLightsIntensity ?? 1.25 }
-    const uAtmosphereIntensity = { value: earth.atmosphereIntensity ?? 0.55 }
-    const uCloudsNightMultiplier = { value: 0.0 }
+    const uNightAlbedo = { value: nightAlbedo ?? 1 }
+    const uTwilight = { value: Math.max(0.0001, surface.terminatorTwilight ?? 0.12) }
 
-    const restoreEarthSurface = composeOnBeforeCompile(material, (shader) => {
+    const restoreLayeredSurface = composeOnBeforeCompile(material, 'restoreLayeredSurface', (shader) => {
       shader.uniforms.uSunDirWorld = { value: uSunDirWorld }
       shader.uniforms.uNightAlbedo = uNightAlbedo
       shader.uniforms.uTwilight = uTwilight
-      shader.uniforms.uNightLightsIntensity = uNightLightsIntensity
-      shader.uniforms.uOceanSpecIntensity = { value: earth.oceanSpecularIntensity ?? 0.35 }
-      shader.uniforms.uOceanRoughness = { value: earth.oceanRoughness ?? 0.06 }
+      shader.uniforms.uNightLightsIntensity = { value: nightLights?.intensity ?? 1.25 }
+      shader.uniforms.uNightLightsOn = { value: nightLights ? 1 : 0 }
+      shader.uniforms.uNightLightsTwilight = { value: Math.max(0.0001, nightLights?.twilight ?? uTwilight.value) }
+      shader.uniforms.uBlueAlbedoWater = { value: water?.blueAlbedoFallback ? 1 : 0 }
+      shader.uniforms.uOceanSpecIntensity = { value: water ? (water.specularIntensity ?? 0.35) : 0 }
+      shader.uniforms.uOceanRoughness = { value: water?.roughness ?? 0.06 }
       shader.uniforms.uWaterMaskMap = waterMaskUniform
       shader.uniforms.uUseWaterMask = useWaterMaskUniform
 
       // Apply shader injections atomically (all-or-nothing) so we don't end up
       // with partial patches if a future Three.js chunk changes.
-      const markerCommon = '// tspice:earth:uniforms'
-      const markerNormal = '// tspice:earth:geometry-normal'
-      const markerDarken = '// tspice:earth:night-side-darken'
-      const markerNightLights = '// tspice:earth:night-lights'
+      const markerCommon = '// tspice:surface-effects:uniforms'
+      const markerNormal = '// tspice:surface-effects:geometry-normal'
+      const markerDarken = '// tspice:surface-effects:night-side-darken'
+      const markerNightLights = '// tspice:surface-effects:night-lights'
 
       const required = safeShaderReplaceAll({
         shader,
         source: 'fragmentShader',
         warnOnce,
-        warnKey: 'earth:required:patch',
+        warnKey: 'surface-effects:required:patch',
         replacements: [
           {
             needle: '#include <common>',
@@ -1055,12 +1043,15 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               'uniform float uNightAlbedo;',
               'uniform float uTwilight;',
               'uniform float uNightLightsIntensity;',
+              'uniform float uNightLightsOn;',
+              'uniform float uNightLightsTwilight;',
+              'uniform float uBlueAlbedoWater;',
               'uniform float uOceanSpecIntensity;',
               'uniform float uOceanRoughness;',
               'uniform sampler2D uWaterMaskMap;',
               'uniform float uUseWaterMask;',
             ].join('\n'),
-            warnKey: 'earth:uniforms',
+            warnKey: 'surface-effects:uniforms',
           },
           {
             needle: '#include <normal_fragment_begin>',
@@ -1071,14 +1062,14 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               '\t// Stable geometric normal (view space) before any normal map perturbations.',
               '\tvec3 tspiceGeometryNormal = nonPerturbedNormal;',
             ].join('\n'),
-            warnKey: 'earth:geometry-normal',
+            warnKey: 'surface-effects:geometry-normal',
           },
           {
             needle: '#include <lights_fragment_begin>',
             marker: markerDarken,
             replacement: [
               markerDarken,
-              '\t// Earth-only: suppress ambient-lit albedo on the night side.',
+              '\t// suppress ambient-lit albedo on the night side.',
               '\t{',
               '\t\tvec3 sunDirView = normalize( ( viewMatrix * vec4( uSunDirWorld, 0.0 ) ).xyz );',
               '\t\t// Use the unperturbed geometric normal so the terminator mask is stable',
@@ -1086,14 +1077,14 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               '\t\tfloat ndotl = dot( tspiceGeometryNormal, sunDirView );',
               '\t\tfloat dayFactor = smoothstep( 0.0, uTwilight, ndotl );',
               '',
-              '\t\t// Keep a tiny floor so Earth is not totally invisible at night.',
+              '\t\t// Apply the authored night-side albedo floor.',
               '\t\tfloat nightAlbedo = uNightAlbedo;',
               '\t\tdiffuseColor.rgb *= mix( nightAlbedo, 1.0, dayFactor );',
               '\t}',
               '',
               '#include <lights_fragment_begin>',
             ].join('\n'),
-            warnKey: 'earth:night-side-darken',
+            warnKey: 'surface-effects:night-side-darken',
           },
           {
             needle: '#include <emissivemap_fragment>',
@@ -1102,15 +1093,15 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               '#include <emissivemap_fragment>',
               markerNightLights,
               '',
-              '\t// Earth-only: gate night lights to the night side (soft terminator).',
+              '\t// gate night lights to the night side (soft terminator).',
               '\t{',
               '\t\tvec3 sunDirView = normalize( ( viewMatrix * vec4( uSunDirWorld, 0.0 ) ).xyz );',
               '\t\tfloat ndotl = dot( tspiceGeometryNormal, sunDirView );',
-              '\t\tfloat nightMask = 1.0 - smoothstep( -uTwilight, uTwilight, ndotl );',
-              '\t\ttotalEmissiveRadiance *= nightMask * uNightLightsIntensity;',
+              '\t\tfloat nightMask = 1.0 - smoothstep( -uNightLightsTwilight, uNightLightsTwilight, ndotl );',
+              '\t\ttotalEmissiveRadiance *= mix( 1.0, nightMask * uNightLightsIntensity, uNightLightsOn );',
               '\t}',
             ].join('\n'),
-            warnKey: 'earth:night-lights',
+            warnKey: 'surface-effects:night-lights',
           },
         ],
       })
@@ -1119,9 +1110,9 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
       let nextFrag = required.next
 
-      const markerWaterFactor = '// tspice:earth:water-factor'
-      const markerRoughness = '// tspice:earth:ocean-roughness'
-      const markerGlint = '// tspice:earth:ocean-glint'
+      const markerWaterFactor = '// tspice:surface-effects:water-factor'
+      const markerRoughness = '// tspice:surface-effects:ocean-roughness'
+      const markerGlint = '// tspice:surface-effects:ocean-glint'
       const water = safeShaderReplaceAllInSource({
         src: nextFrag,
         source: 'fragmentShader',
@@ -1133,9 +1124,9 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
             replacement: [
               'vec3 totalEmissiveRadiance = emissive;',
               markerWaterFactor,
-              'float earthWaterFactor = 0.0;',
+              'float tspiceWaterFactor = 0.0;',
             ].join('\n'),
-            warnKey: 'earth:water-factor',
+            warnKey: 'surface-effects:water-factor',
           },
           {
             needle: '#include <roughnessmap_fragment>',
@@ -1144,29 +1135,29 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               '#include <roughnessmap_fragment>',
               markerRoughness,
               '',
-              '\t// Earth-only: ocean roughness heuristic / optional mask.',
+              '\t// ocean roughness heuristic / optional mask.',
               '\t{',
-              '\t\tvec2 earthUv = vec2( 0.0 );',
+              '\t\tvec2 tspiceSurfaceUv = vec2( 0.0 );',
               '\t\t#ifdef USE_MAP',
-              '\t\t\tearthUv = vMapUv;',
+              '\t\t\ttspiceSurfaceUv = vMapUv;',
               '\t\t#elif defined( USE_UV )',
-              '\t\t\tearthUv = vUv;',
+              '\t\t\ttspiceSurfaceUv = vUv;',
               '\t\t#endif',
               '',
               '\t\tfloat waterMask = 0.0;',
               '\t\tif ( uUseWaterMask > 0.5 ) {',
-              '\t\t\twaterMask = texture2D( uWaterMaskMap, earthUv ).r;',
-              '\t\t} else {',
+              '\t\t\twaterMask = texture2D( uWaterMaskMap, tspiceSurfaceUv ).r;',
+              '\t\t} else if ( uBlueAlbedoWater > 0.5 ) {',
               '\t\t\tvec3 c = diffuseColor.rgb;',
               '\t\t\tfloat blueDom = c.b - max( c.r, c.g );',
               '\t\t\twaterMask = smoothstep( 0.02, 0.18, blueDom ) * smoothstep( 0.05, 0.65, c.b );',
               '\t\t}',
               '',
-              '\t\tearthWaterFactor = clamp( waterMask, 0.0, 1.0 );',
-              '\t\troughnessFactor = mix( roughnessFactor, uOceanRoughness, earthWaterFactor );',
+              '\t\ttspiceWaterFactor = clamp( waterMask, 0.0, 1.0 );',
+              '\t\troughnessFactor = mix( roughnessFactor, uOceanRoughness, tspiceWaterFactor );',
               '\t}',
             ].join('\n'),
-            warnKey: 'earth:ocean-roughness',
+            warnKey: 'surface-effects:ocean-roughness',
           },
           {
             needle: '#include <lights_fragment_end>',
@@ -1175,18 +1166,18 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               '#include <lights_fragment_end>',
               markerGlint,
               '',
-              '\t// Earth-only: cheap ocean glint (fallback when a proper water mask is unavailable).',
+              '\t// cheap ocean glint (fallback when a proper water mask is unavailable).',
               '\t{',
               '\t\tvec3 sunDirView = normalize( ( viewMatrix * vec4( uSunDirWorld, 0.0 ) ).xyz );',
               '\t\tvec3 viewDir = normalize( vViewPosition );',
               '\t\tfloat ndotl = max( dot( normal, sunDirView ), 0.0 );',
               '\t\tvec3 h = normalize( sunDirView + viewDir );',
               '\t\tfloat ndoth = max( dot( normal, h ), 0.0 );',
-              '\t\tfloat glint = pow( ndoth, 420.0 ) * ndotl * earthWaterFactor * uOceanSpecIntensity;',
+              '\t\tfloat glint = pow( ndoth, 420.0 ) * ndotl * tspiceWaterFactor * uOceanSpecIntensity;',
               '\t\treflectedLight.directSpecular += vec3( glint );',
               '\t}',
             ].join('\n'),
-            warnKey: 'earth:ocean-glint',
+            warnKey: 'surface-effects:ocean-glint',
           },
         ],
       })
@@ -1198,27 +1189,23 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
       const shaderSources: ShaderSource = shader
       shaderSources.fragmentShader = nextFrag
     })
-    onBeforeCompileRestores.push(restoreEarthSurface)
+    onBeforeCompileRestores.push(restoreLayeredSurface)
+  }
 
-    // Atmosphere shell
-    createRimGlowShell({
-      radiusRatio: earth.atmosphereRadiusRatio ?? 1.015,
-      renderOrder: 2,
-      color: earth.atmosphereColor ?? '#79b8ff',
-      intensity: uAtmosphereIntensity,
-      rimPower: { value: earth.atmosphereRimPower ?? 2.2 },
-      sunBias: { value: earth.atmosphereSunBias ?? 0.65 },
-    })
-
+  if (clouds) {
+    ensureSunDirWorldUpdate()
+    const uTwilight = { value: Math.max(0.0001, clouds.twilight ?? 0.12) }
+    const uCloudsNightMultiplier = { value: clouds.nightMultiplier ?? 0 }
     // Clouds shell
     const cloudsGeo = new THREE.SphereGeometry(1, 48, 24)
     cloudsGeo.rotateX(Math.PI / 2)
+    if (clouds.alignWithSurface !== false && textureLongitudeOffset !== 0) cloudsGeo.rotateZ(textureLongitudeOffset)
     extraGeometriesToDispose.push(cloudsGeo)
     const newCloudsMaterial = new THREE.MeshStandardMaterial({
       color: '#ffffff',
       transparent: true,
-      opacity: earth.cloudsOpacity ?? 0.85,
-      alphaTest: earth.cloudsAlphaTest ?? 0.02,
+      opacity: clouds.opacity ?? 0.85,
+      alphaTest: clouds.alphaTest ?? 0.02,
       depthWrite: false,
       roughness: 1.0,
       metalness: 0.0,
@@ -1229,20 +1216,20 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
 
     // Darken clouds on the night side as well (otherwise the global ambient light
     // makes clouds show up nearly as brightly at night as during day).
-    const restoreEarthClouds = composeOnBeforeCompile(newCloudsMaterial, (shader) => {
+    const restoreClouds = composeOnBeforeCompile(newCloudsMaterial, 'restoreClouds', (shader) => {
       shader.uniforms.uSunDirWorld = { value: uSunDirWorld }
       shader.uniforms.uTwilight = uTwilight
       shader.uniforms.uCloudsNightMultiplier = uCloudsNightMultiplier
 
-      const markerCommon = '// tspice:earth-clouds:uniforms'
-      const markerNormal = '// tspice:earth-clouds:geometry-normal'
-      const markerLights = '// tspice:earth-clouds:night-side'
+      const markerCommon = '// tspice:clouds:uniforms'
+      const markerNormal = '// tspice:clouds:geometry-normal'
+      const markerLights = '// tspice:clouds:night-side'
 
       const res = safeShaderReplaceAll({
         shader,
         source: 'fragmentShader',
         warnOnce,
-        warnKey: 'earth-clouds:patch',
+        warnKey: 'clouds:patch',
         replacements: [
           {
             needle: '#include <common>',
@@ -1254,7 +1241,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               'uniform float uTwilight;',
               'uniform float uCloudsNightMultiplier;',
             ].join('\n'),
-            warnKey: 'earth-clouds:uniforms',
+            warnKey: 'clouds:uniforms',
           },
           {
             needle: '#include <normal_fragment_begin>',
@@ -1265,14 +1252,14 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               '\t// Stable geometric normal (view space) before any normal map perturbations.',
               '\tvec3 tspiceGeometryNormal = nonPerturbedNormal;',
             ].join('\n'),
-            warnKey: 'earth-clouds:geometry-normal',
+            warnKey: 'clouds:geometry-normal',
           },
           {
             needle: '#include <lights_fragment_begin>',
             marker: markerLights,
             replacement: [
               markerLights,
-              '\t// Earth-only: suppress ambient-lit clouds on the night side.',
+              '\t// suppress ambient-lit clouds on the night side.',
               '\t{',
               '\t\tvec3 sunDirView = normalize( ( viewMatrix * vec4( uSunDirWorld, 0.0 ) ).xyz );',
               '\t\tfloat ndotl = dot( tspiceGeometryNormal, sunDirView );',
@@ -1282,7 +1269,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
               '',
               '#include <lights_fragment_begin>',
             ].join('\n'),
-            warnKey: 'earth-clouds:night-side',
+            warnKey: 'clouds:night-side',
           },
         ],
       })
@@ -1292,131 +1279,107 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
       const shaderSources: ShaderSource = shader
       shaderSources.fragmentShader = res.next
     })
-    onBeforeCompileRestores.push(restoreEarthClouds)
+    onBeforeCompileRestores.push(restoreClouds)
 
     cloudsMesh = new THREE.Mesh(cloudsGeo, newCloudsMaterial)
-    cloudsMesh.scale.setScalar(earth.cloudsRadiusRatio ?? 1.01)
+    cloudsMesh.scale.setScalar(clouds.radiusRatio ?? 1.01)
     cloudsMesh.renderOrder = 1
     mesh.add(cloudsMesh)
 
-    cloudsDriftRadPerSec = earth.cloudsDriftRadPerSec ?? 0.0
+    cloudsDriftRadPerSec = clouds.driftRadPerSec ?? 0.0
 
-    // Load optional textures.
-    const extras: Promise<void>[] = []
+    readyExtras.push(
+      loadTextureCached(clouds.textureUrl, { colorSpace: THREE.SRGBColorSpace })
+        .then(({ texture: tex, release }) => {
+          let installed = false
+          try {
+            if (disposed) return
 
-    if (earth.nightLightsTextureUrl) {
-      extras.push(
-        loadTextureCached(earth.nightLightsTextureUrl, { colorSpace: THREE.SRGBColorSpace })
-          .then(({ texture: tex, release }) => {
-            let installed = false
-            try {
-              if (disposed) return
+            tex.wrapS = THREE.RepeatWrapping
+            tex.wrapT = THREE.RepeatWrapping
+            tex.needsUpdate = true
 
-              tex.wrapS = THREE.RepeatWrapping
-              tex.wrapT = THREE.RepeatWrapping
-              tex.needsUpdate = true
+            newCloudsMaterial.alphaMap = tex
+            newCloudsMaterial.needsUpdate = true
 
-              material.emissive.set('#ffffff')
-              material.emissiveMap = tex
-              material.needsUpdate = true
+            extraTextureReleases.push(release)
+            installed = true
+          } finally {
+            if (!installed) release()
+          }
+        })
+        .catch((err) => {
+          if (disposed || isTextureCacheClearedError(err)) return
+          console.warn('Failed to load clouds texture', { bodyId: options.bodyId, url: clouds.textureUrl }, err)
+        }),
+    )
 
-              extraTextureReleases.push(release)
-              installed = true
-            } finally {
-              if (!installed) release()
-            }
-          })
-          .catch((err) => {
-            if (disposed || isTextureCacheClearedError(err)) return
-            console.warn(
-              'Failed to load Earth night lights texture',
-              { bodyId: options.bodyId, url: earth.nightLightsTextureUrl },
-              err,
-            )
-          }),
-      )
-    }
-
-    if (earth.cloudsTextureUrl) {
-      extras.push(
-        loadTextureCached(earth.cloudsTextureUrl, { colorSpace: THREE.SRGBColorSpace })
-          .then(({ texture: tex, release }) => {
-            let installed = false
-            try {
-              if (disposed) return
-
-              tex.wrapS = THREE.RepeatWrapping
-              tex.wrapT = THREE.RepeatWrapping
-              tex.needsUpdate = true
-
-              newCloudsMaterial.alphaMap = tex
-              newCloudsMaterial.needsUpdate = true
-
-              extraTextureReleases.push(release)
-              installed = true
-            } finally {
-              if (!installed) release()
-            }
-          })
-          .catch((err) => {
-            if (disposed || isTextureCacheClearedError(err)) return
-            console.warn(
-              'Failed to load Earth clouds texture',
-              { bodyId: options.bodyId, url: earth.cloudsTextureUrl },
-              err,
-            )
-          }),
-      )
-    }
-
-    if (earth.waterMaskTextureUrl) {
-      extras.push(
-        loadTextureCached(earth.waterMaskTextureUrl, { colorSpace: THREE.NoColorSpace })
-          .then(({ texture: tex, release }) => {
-            let installed = false
-            try {
-              if (disposed) return
-
-              tex.wrapS = THREE.RepeatWrapping
-              tex.wrapT = THREE.RepeatWrapping
-              tex.needsUpdate = true
-
-              waterMaskUniform.value = tex
-              useWaterMaskUniform.value = 1.0
-
-              extraTextureReleases.push(release)
-              installed = true
-            } finally {
-              if (!installed) release()
-            }
-          })
-          .catch((err) => {
-            if (disposed || isTextureCacheClearedError(err)) return
-            console.warn(
-              'Failed to load Earth water mask texture',
-              { bodyId: options.bodyId, url: earth.waterMaskTextureUrl },
-              err,
-            )
-          }),
-      )
-    }
-
-    readyExtras.push(...extras)
-
-    update = composeUpdate(update, ({ sunDirWorld: _sunDirWorld, etSec, earthTuning }) => {
-      if (earthTuning) {
-        uNightAlbedo.value = earthTuning.nightAlbedo
-        uTwilight.value = earthTuning.twilight
-        uNightLightsIntensity.value = earthTuning.nightLightsIntensity
-        uAtmosphereIntensity.value = earthTuning.atmosphereIntensity
-        uCloudsNightMultiplier.value = earthTuning.cloudsNightMultiplier
-      }
-
+    update = composeUpdate(update, ({ etSec }) => {
       if (cloudsMesh && cloudsDriftRadPerSec !== 0) {
-        const phase = (etSec * cloudsDriftRadPerSec) % (Math.PI * 2)
-        cloudsMesh.rotation.z = phase
+        cloudsMesh.rotation.z = (etSec * cloudsDriftRadPerSec) % (Math.PI * 2)
       }
     })
+  }
+
+  if (nightLights) {
+    readyExtras.push(
+      loadTextureCached(nightLights.textureUrl, { colorSpace: THREE.SRGBColorSpace })
+        .then(({ texture: tex, release }) => {
+          let installed = false
+          try {
+            if (disposed) return
+
+            tex.wrapS = THREE.RepeatWrapping
+            tex.wrapT = THREE.RepeatWrapping
+            tex.needsUpdate = true
+
+            material.emissive.set('#ffffff')
+            material.emissiveMap = tex
+            material.needsUpdate = true
+
+            extraTextureReleases.push(release)
+            installed = true
+          } finally {
+            if (!installed) release()
+          }
+        })
+        .catch((err) => {
+          if (disposed || isTextureCacheClearedError(err)) return
+          console.warn(
+            'Failed to load night lights texture',
+            { bodyId: options.bodyId, url: nightLights.textureUrl },
+            err,
+          )
+        }),
+    )
+  }
+
+  if (water?.maskTextureUrl) {
+    readyExtras.push(
+      loadTextureCached(water.maskTextureUrl, { colorSpace: THREE.NoColorSpace })
+        .then(({ texture: tex, release }) => {
+          let installed = false
+          try {
+            if (disposed) return
+
+            tex.wrapS = THREE.RepeatWrapping
+            tex.wrapT = THREE.RepeatWrapping
+            tex.needsUpdate = true
+
+            waterMaskUniform.value = tex
+            useWaterMaskUniform.value = 1.0
+
+            extraTextureReleases.push(release)
+            installed = true
+          } finally {
+            if (!installed) release()
+          }
+        })
+        .catch((err) => {
+          if (disposed || isTextureCacheClearedError(err)) return
+          console.warn('Failed to load water mask texture', { bodyId: options.bodyId, url: water.maskTextureUrl }, err)
+        }),
+    )
   }
 
   const ready = Promise.all(readyExtras).then(() => undefined)
@@ -1426,7 +1389,7 @@ export function createBodyMesh(options: CreateBodyMeshOptions): {
     dispose: () => {
       disposed = true
 
-      for (const restore of onBeforeCompileRestores) restore()
+      for (const restore of onBeforeCompileRestores.reverse()) restore()
       onBeforeCompileRestores.length = 0
 
       // Detach texture references before releasing/disposing them.

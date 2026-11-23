@@ -67,8 +67,10 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
     style: {
       radiusKm: 695_700,
       appearance: {
+        emission: { color: '#ffcc55', intensity: 10, bloom: true },
         surface: {
           color: '#ffb703',
+          roughness: 0.2,
           texture: {
             url: 'static/textures/planets/sun.png',
             kind: 'sun',
@@ -141,37 +143,38 @@ export const SOL_BODIES: readonly BodyRegistryEntry[] = [
       appearance: {
         surface: {
           color: '#2a9d8f',
+          nightAlbedo: 0.004,
+          terminatorTwilight: 0.12,
           texture: {
             url: 'static/textures/planets/earth.png',
             color: '#e6e6e6',
           },
         },
+        nightLights: {
+          textureUrl: 'static/textures/planets/earth-nightlights.jpg',
+          intensity: 1.35,
+          twilight: 0.12,
+        },
+        clouds: {
+          textureUrl: 'static/textures/planets/earth-clouds.jpg',
+          radiusRatio: 1.01,
+          opacity: 0.85,
+          alphaTest: 0.02,
+          driftRadPerSec: 0.00004,
+          nightMultiplier: 0,
+          twilight: 0.12,
+        },
+        water: { blueAlbedoFallback: true, roughness: 0.06, specularIntensity: 0.35 },
         layers: [
           {
-            kind: 'earth',
-            earth: {
-              nightLightsTextureUrl: 'static/textures/planets/earth-nightlights.jpg',
-              cloudsTextureUrl: 'static/textures/planets/earth-clouds.jpg',
-              // Hook: we currently use a heuristic water factor (derived from albedo).
-              // If we add a dedicated mask later, set `waterMaskTextureUrl` here.
-              // waterMaskTextureUrl: 'static/textures/planets/earth-water-mask.png',
-
-              nightLightsIntensity: 1.35,
-              nightLightsTwilight: 0.12,
-
-              cloudsRadiusRatio: 1.01,
-              cloudsOpacity: 0.85,
-              cloudsAlphaTest: 0.02,
-              cloudsDriftRadPerSec: 0.00004,
-
-              atmosphereRadiusRatio: 1.015,
-              atmosphereColor: '#79b8ff',
-              atmosphereIntensity: 0.55,
-              atmosphereRimPower: 2.2,
-              atmosphereSunBias: 0.65,
-
-              oceanRoughness: 0.06,
-              oceanSpecularIntensity: 0.35,
+            kind: 'atmosphere',
+            atmosphere: {
+              radiusRatio: 1.015,
+              renderOrder: 2,
+              color: '#79b8ff',
+              intensity: 0.55,
+              rimPower: 2.2,
+              sunBias: 0.65,
             },
           },
         ],

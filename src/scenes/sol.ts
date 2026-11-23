@@ -73,6 +73,5 @@ export const SOL_SCENE = {
       maxRadius: Math.max(...homeRadii) * 20_000,
     },
     ambientLightIntensity: 0.45,
-    starEmission: { intensity: 10, color: '#ffcc55' },
   },
 } satisfies SceneDefinition

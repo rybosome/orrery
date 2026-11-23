@@ -42,12 +42,6 @@ export type SceneUiState = {
   // Debug-only: helps the Sun read as a glowing object at distance.
   sunEmissiveIntensity: number
   sunEmissiveColor: string
-
-  earthNightAlbedo: number
-  earthTwilight: number
-  earthNightLightsIntensity: number
-  earthAtmosphereIntensity: number
-  earthCloudsNightMultiplier: number
 }
 
 export type SpiceSceneRuntime = {
@@ -181,7 +175,7 @@ async function buildSceneRuntime(
     // Store radiusKm for dynamic scale updates
     mesh.userData.radiusKm = body.style.radiusKm
 
-    if (bodyId === starId) {
+    if (body.style.appearance.emission?.bloom) {
       mesh.layers.enable(SUN_BLOOM_LAYER)
     }
 
@@ -204,6 +198,7 @@ async function buildSceneRuntime(
       bodyId,
       label: body.style.label ?? body.id,
       kind: body.kind,
+      hasEmission: Boolean(body.style.appearance.emission),
       bodyFixedFrame: body.bodyFixedFrame,
       radiusKm: body.style.radiusKm,
       mesh,
@@ -219,12 +214,7 @@ async function buildSceneRuntime(
 
   const bodiesById = new Map(bodies.map((body) => [body.bodyId, body]))
   const star = bodiesById.get(starId)
-  const sunMesh = star?.mesh
-  const sunMaterial = (() => {
-    const m = sunMesh?.material
-    if (!m) return null
-    return (Array.isArray(m) ? m[0] : m) as THREE.Material
-  })()
+  const sunMaterial = star?.hasEmission ? star.mesh.material : undefined
 
   // Ensure textures are loaded before we mark the scene as rendered.
   await Promise.all(bodies.map((b) => b.ready))
@@ -357,18 +347,10 @@ async function buildSceneRuntime(
       dir.intensity = next.sunLightIntensity
 
       // Sun glow tuning.
-      if (sunMaterial && sunMaterial instanceof THREE.MeshStandardMaterial) {
+      if (sunMaterial) {
         const intensity = THREE.MathUtils.clamp(next.sunEmissiveIntensity, 0, 50)
         sunMaterial.emissive.set(next.sunEmissiveColor)
         sunMaterial.emissiveIntensity = intensity
-      }
-
-      const earthTuning = {
-        nightAlbedo: next.earthNightAlbedo,
-        twilight: next.earthTwilight,
-        nightLightsIntensity: next.earthNightLightsIntensity,
-        atmosphereIntensity: next.earthAtmosphereIntensity,
-        cloudsNightMultiplier: next.earthCloudsNightMultiplier,
       }
 
       // Only refetch SPICE if ET changes.
@@ -647,7 +629,7 @@ async function buildSceneRuntime(
       // Update any body-specific shader uniforms using the same sun direction.
       const sunDirWorld = dir.position.clone().normalize()
       for (const b of bodies) {
-        b.update?.({ sunDirWorld, etSec: next.etSec, earthTuning })
+        b.update?.({ sunDirWorld, etSec: next.etSec })
       }
 
       // Record label overlay inputs so we can update it on camera movement.
