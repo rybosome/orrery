@@ -2,7 +2,6 @@ import type { CameraController } from '../controls/CameraController.js'
 import type { BodyRef } from '../spice/types.js'
 import type { TimeState } from '../time/timeStore.js'
 import {
-  SCENE_SNAPSHOT_SCHEMA_VERSION,
   cameraControllerStateToSnapshotCamera,
   normalizeSceneSnapshot,
   playbackDirectionForRate,
@@ -19,7 +18,6 @@ import {
 
 export type SceneSnapshotCaptureInput = {
   controller: CameraController
-  focusBody: BodyRef
   time: TimeState
   scale: SceneSnapshotScaleOptionsV1
   guides: SceneSnapshotGuideOptionsV1
@@ -55,13 +53,11 @@ export type SceneSnapshotApplyInput = {
 }
 
 /** Capture a canonical snapshot from live controller/time/UI state. */
-export function captureSnapshot(input: SceneSnapshotCaptureInput): SceneSnapshotV1 {
+export function captureSnapshotView(input: SceneSnapshotCaptureInput): SceneSnapshotView {
   const direction = playbackDirectionForRate(input.time.rateSecPerSec)
 
-  const snapshot = {
-    v: SCENE_SNAPSHOT_SCHEMA_VERSION,
+  return {
     camera: cameraControllerStateToSnapshotCamera(input.controller.snapshot()),
-    focusBody: input.focusBody,
     player: {
       etSec: input.time.etSec,
       rateSecPerSec: input.time.rateSecPerSec,
@@ -77,9 +73,7 @@ export function captureSnapshot(input: SceneSnapshotCaptureInput): SceneSnapshot
     orbitPaths: input.orbitPaths,
     system: input.system,
     rendering: input.rendering,
-  } satisfies SceneSnapshotV1
-
-  return normalizeSceneSnapshot(snapshot)
+  }
 }
 
 /**

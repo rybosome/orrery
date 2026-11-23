@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { V1_MARS_VIEW_PAYLOAD } from '../snapshot/fixtures/v1SolViews.js'
 import { V2_SOL_MARS_VIEW_PAYLOAD } from '../snapshot/fixtures/v2SolViews.js'
 import { decodeSnapshotDocument, encodeSnapshotDocument } from '../snapshot/sceneSnapshotCodec.js'
-import { buildScenePath, resolveSceneRoute } from './sceneRoute.js'
+import { buildScenePath, canonicalHomePath, resolveSceneRoute } from './sceneRoute.js'
 
 describe('scene routes', () => {
   it('resolves the registered scene within the deployment base', () => {
@@ -12,6 +12,14 @@ describe('scene routes', () => {
     expect(resolveSceneRoute('/viewer/sol', '/viewer/')).toMatchObject({ kind: 'scene', scene: { id: 'sol' } })
     expect(resolveSceneRoute('/viewer-other/sol', '/viewer/')).toMatchObject({ kind: 'unknown' })
     expect(resolveSceneRoute('/trappist-1', '/')).toMatchObject({ kind: 'unknown' })
+  })
+
+  it('canonicalizes only the application root', () => {
+    expect(canonicalHomePath('/', '/')).toBe('/sol')
+    expect(canonicalHomePath('/viewer', '/viewer/')).toBe('/viewer/sol')
+    expect(canonicalHomePath('/viewer/', '/viewer/')).toBe('/viewer/sol')
+    expect(canonicalHomePath('/sol', '/')).toBeUndefined()
+    expect(canonicalHomePath(`/${V1_MARS_VIEW_PAYLOAD}`, '/')).toBeUndefined()
   })
 
   it('restores both released v1 URL shapes and v2 with a scene-local focus ID', () => {

@@ -117,6 +117,9 @@ jobs:
             pages deploy dist
             --project-name "${{ env.PAGES_PROJECT }}"
 
+      - name: Verify production routes and assets
+        run: node scripts/check-hosted-routes.mjs https://orrery.ryboso.me/
+
   deploy-preview:
     name: Deploy preview (pull request)
     # Secrets aren't exposed to workflows triggered from forked PRs.

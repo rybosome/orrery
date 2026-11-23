@@ -1,10 +1,13 @@
 import './App.css'
 import { SceneCanvas } from './SceneCanvas'
-import { buildScenePath, resolveSceneRoute } from './scenes/sceneRoute.js'
+import { buildScenePath, canonicalHomePath, resolveSceneRoute } from './scenes/sceneRoute.js'
 import { createSolTestScene } from './e2eHooks/solTestScene.js'
 
-const query = new URLSearchParams(window.location.search)
-const route = resolveSceneRoute(window.location.pathname, import.meta.env.BASE_URL)
+const { pathname, search, hash } = window.location
+const query = new URLSearchParams(search)
+const route = resolveSceneRoute(pathname, import.meta.env.BASE_URL)
+const canonicalPath = canonicalHomePath(pathname, import.meta.env.BASE_URL)
+if (canonicalPath) window.history.replaceState(window.history.state, '', canonicalPath + search + hash)
 const useTestScene = import.meta.env.DEV && query.has('e2e') && query.has('testScene')
 
 function App() {

@@ -21,17 +21,14 @@ import { createThreeRuntime, type ThreeRuntime } from './renderer/createThreeRun
 import { parseSceneCanvasRuntimeConfigFromLocationSearch } from './runtimeConfig/sceneCanvasRuntimeConfig.js'
 import { initSpiceSceneRuntime, type SpiceSceneRuntime } from './scene/runtime/initSpiceSceneRuntime.js'
 import type { SceneDefinition } from './scenes/sceneDefinition.js'
-import { applySnapshotView, captureSnapshot } from './snapshot/sceneSnapshotAdapter.js'
+import { applySnapshotView, captureSnapshotView } from './snapshot/sceneSnapshotAdapter.js'
 import {
-  buildSnapshotShareUrlForLocation,
+  buildSceneSnapshotShareUrl,
   INITIAL_SNAPSHOT_SHARE_STATE,
   reduceSnapshotShareState,
 } from './snapshot/sceneSnapshotShare.js'
-import {
-  snapshotCameraToControllerState,
-  type SceneSnapshotRestore,
-  type SceneSnapshotV1,
-} from './snapshot/sceneSnapshot.js'
+import { snapshotCameraToControllerState, type SceneSnapshotRestore } from './snapshot/sceneSnapshot.js'
+import type { SceneSnapshotV2 } from './snapshot/sceneSnapshotV2.js'
 
 type AdvancedPaneId = 'time' | 'scale' | 'guides' | 'orbits' | 'system' | 'rendering'
 
@@ -240,7 +237,7 @@ function AdvancedHelpButton({
 }
 
 type SceneSnapshotBindings = {
-  captureSnapshot: () => SceneSnapshotV1 | null
+  captureSnapshot: () => SceneSnapshotV2 | null
   applySnapshot: (snapshot: SceneSnapshotRestore) => Promise<SceneSnapshotRestore>
 }
 
@@ -825,14 +822,15 @@ export function SceneCanvas({
     sunEmissiveColor,
   }
 
-  const captureSceneSnapshot = useCallback((): SceneSnapshotV1 | null => {
+  const captureSceneSnapshot = useCallback((): SceneSnapshotV2 | null => {
     const controller = controllerRef.current
     if (!controller) return null
 
-    return captureSnapshot({
+    const time = timeStore.getState()
+    const emission = new THREE.Color(SUN_EMISSIVE_COLOR_DEFAULT).set(sunEmissiveColor)
+    const view = captureSnapshotView({
       controller,
-      focusBody: bodiesById.get(focusBody)?.body ?? focusBody,
-      time: timeStore.getState(),
+      time: { ...time, quantumSec: THREE.MathUtils.clamp(time.quantumSec, 0.001, 86_400) },
       scale: {
         cameraFovDeg,
         sunScaleMultiplier,
@@ -848,7 +846,7 @@ export function SceneCanvas({
         enabled: orbitPathsEnabled,
         lineWidthPx: orbitLineWidthPx,
         samplesPerOrbit: orbitSamplesPerOrbit,
-        maxTotalPoints: orbitMaxTotalPoints,
+        maxTotalPoints: THREE.MathUtils.clamp(Math.round(orbitMaxTotalPoints), 256, 1_000_000),
       },
       system: {
         animatedSky,
@@ -859,7 +857,7 @@ export function SceneCanvas({
         ambientLightIntensity,
         sunLightIntensity,
         sunEmissiveIntensity,
-        sunEmissiveColor,
+        sunEmissiveColor: `#${emission.getHexString()}`,
         sunPostprocessExposure,
         sunPostprocessToneMap,
         sunPostprocessBloomThreshold,
@@ -868,9 +866,11 @@ export function SceneCanvas({
         sunPostprocessBloomResolutionScale,
       },
     })
+    return { ...view, v: 2, sceneId: definition.id, focusBodyId: focusBody }
   }, [
     timeStore,
-    bodiesById,
+    definition.id,
+    SUN_EMISSIVE_COLOR_DEFAULT,
     focusBody,
     cameraFovDeg,
     sunScaleMultiplier,
@@ -905,7 +905,7 @@ export function SceneCanvas({
     const snapshot = bindings.captureSnapshot()
     if (!snapshot) return
 
-    const shareUrl = buildSnapshotShareUrlForLocation(snapshot, window.location.href)
+    const shareUrl = buildSceneSnapshotShareUrl(snapshot, window.location.href, import.meta.env.BASE_URL)
     setSnapshotShareState((current) => reduceSnapshotShareState(current, { type: 'generated', url: shareUrl }))
   }, [])
 
