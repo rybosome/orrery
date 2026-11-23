@@ -77,9 +77,12 @@ export function PlaybackControls({ spice, timeStore, getDefaultResumeRateSecPerS
     return `${state.etSec.toFixed(1)}s`
   }, [state.etSec])
 
-  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    timeStore.setEtSec(Number(e.target.value))
-  }, [])
+  const handleSliderChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      timeStore.setEtSec(Number(e.target.value))
+    },
+    [timeStore],
+  )
 
   const isPlaying = state.rateSecPerSec !== 0
   const isReverse = state.rateSecPerSec < 0
